@@ -1519,13 +1519,16 @@
                 return;
             }
 
+            let html = buildVolumePanelHtml(this.getWeeklyVolumeByMuscleGroup());
+
             const analysis = calculateRatioAnalysis();
             if (!analysis || !Object.keys(analysis.exercises).length) {
-                container.innerHTML = '<div class="no-data-message">Necesitas al menos sentadilla, banca y remo para análisis completo</div>';
+                html += '<div class="no-data-message">Necesitas al menos sentadilla, banca y remo para el análisis de ratios de fuerza</div>';
+                container.innerHTML = html;
                 return;
             }
 
-            let html = '<div class="alert">Análisis de ratios de fuerza basado en tus últimos registros</div>';
+            html += '<div class="alert" style="margin-top: 20px;">Análisis de ratios de fuerza basado en tus últimos registros</div>';
 
             for (const [key, data] of Object.entries(analysis.exercises)) {
                 const fill = Math.min((data.percentage / 100) * 100, 150);
@@ -1605,6 +1608,68 @@
             if (/tricep|frances|fondos.*paralelas|extension.*brazo/.test(lower)) return { muscleGroup: 'brazos', pattern: 'extension codo' };
             if (/plancha|abdomen|abs|bicho muerto|pallof|core|escalador|jumping|bici/.test(lower)) return { muscleGroup: 'core', pattern: 'isometrico' };
             return { muscleGroup: 'otro', pattern: 'otro' };
+        }
+
+        const MUSCLE_GROUP_LABELS = {
+            piernas: 'Piernas', espalda: 'Espalda', pecho: 'Pecho',
+            hombro: 'Hombros', brazos: 'Brazos', core: 'Core', otro: 'Sin clasificar'
+        };
+        const MUSCLE_GROUP_ORDER = ['piernas', 'espalda', 'pecho', 'hombro', 'brazos', 'core', 'otro'];
+
+        function classifyVolumeStatus(count) {
+            if (count < 10) return { label: '🔴 Muy bajo, sumá series', color: '#ff6b6b' };
+            if (count < 12) return { label: '⚠️ Bajo objetivo', color: '#fbbf24' };
+            if (count <= 18) return { label: '✓ En objetivo', color: '#4ADE80' };
+            if (count <= 22) return { label: '⚠️ Alto', color: '#fbbf24' };
+            return { label: '🔴 Muy alto, considerá bajar volumen', color: '#ff6b6b' };
+        }
+
+        app.getWeeklyVolumeByMuscleGroup = function() {
+            const cutoff = new Date();
+            cutoff.setHours(0, 0, 0, 0);
+            cutoff.setDate(cutoff.getDate() - 6);
+            const counts = {};
+            for (const sesion of this.history) {
+                if (new Date(sesion.date) < cutoff) continue;
+                const records = sesion.records || {};
+                for (const [exerciseName, sets] of Object.entries(records)) {
+                    if (!Array.isArray(sets)) continue;
+                    const validCount = sets.filter(s => s && s.weight != null && s.reps != null).length;
+                    if (!validCount) continue;
+                    const { muscleGroup } = classifyMuscleGroup(exerciseName);
+                    counts[muscleGroup] = (counts[muscleGroup] || 0) + validCount;
+                }
+            }
+            return counts;
+        };
+
+        function buildVolumePanelHtml(counts) {
+            const groupsWithData = MUSCLE_GROUP_ORDER.filter(g => g !== 'otro' || counts[g]);
+            if (!groupsWithData.length) return '';
+
+            let html = '<div class="alert">Series efectivas por grupo muscular en los últimos 7 días. Objetivo: 12-18 semanales.</div>';
+            for (const group of groupsWithData) {
+                const count = counts[group] || 0;
+                const info = classifyVolumeStatus(count);
+                const widthPct = Math.min((count / 22) * 100, 100);
+
+                html += `
+                    <div class="ratio-card">
+                        <div class="ratio-header">
+                            <div>
+                                <div class="ratio-exercise">${MUSCLE_GROUP_LABELS[group]}</div>
+                                <div class="ratio-1rm">${count} serie${count === 1 ? '' : 's'} esta semana</div>
+                            </div>
+                        </div>
+                        <div class="ratio-bar">
+                            <div class="ratio-fill" style="width: ${widthPct}%; background: ${info.color};">${count}</div>
+                            <div class="ratio-label">Objetivo 12-18</div>
+                        </div>
+                        <div class="ratio-status" style="color: ${info.color};">${info.label}</div>
+                    </div>
+                `;
+            }
+            return html;
         }
 
         function slugifyExercise(name) {
