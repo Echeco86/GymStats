@@ -691,6 +691,30 @@
             margin-bottom: 6px;
         }
 
+        .backup-reminder {
+            background: #2a2010;
+            border: 1px solid #4a3a1a;
+            border-left: 2px solid #FFB84D;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            color: #ddd;
+            margin-top: 12px;
+            line-height: 1.5;
+        }
+
+        .backup-reminder-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .backup-reminder-actions button {
+            width: auto;
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
         .no-data-message {
             text-align: center;
             padding: 32px 16px;
@@ -715,6 +739,7 @@
         </div>
 
         <div id="globalStatus" style="display: none; padding: 0 16px;"></div>
+        <div id="backupReminder" style="display: none; padding: 0 16px;"></div>
 
         <div class="content">
             <!-- UPLOAD -->
@@ -817,6 +842,7 @@
                 this.setupDragDrop();
                 this.setupPdfWorker();
                 setupSetPropagation();
+                this.checkBackupReminder();
             },
 
             setupPdfWorker() {
@@ -1000,6 +1026,7 @@
                 this.saveToStorage();
                 this.showAlert('✓ Sesión finalizada. Podés elegir otro día para la próxima', 'success');
                 this.refreshTrack();
+                this.checkBackupReminder();
             },
 
             showAlert(msg, type = 'success') {
@@ -1007,6 +1034,60 @@
                 status.style.display = 'block';
                 status.innerHTML = `<div class="${type}" style="margin-top: 12px;">${msg}</div>`;
                 setTimeout(() => { status.style.display = 'none'; }, 3000);
+            },
+
+            markBackupDone() {
+                localStorage.setItem('gym-tracker-last-export', new Date().toISOString());
+                localStorage.removeItem('gym-tracker-backup-snooze-until');
+                this.checkBackupReminder();
+            },
+
+            checkBackupReminder() {
+                const banner = document.getElementById('backupReminder');
+                if (!banner) return;
+
+                if (!this.history.length) {
+                    banner.style.display = 'none';
+                    return;
+                }
+
+                const snoozeUntil = localStorage.getItem('gym-tracker-backup-snooze-until');
+                if (snoozeUntil && new Date(snoozeUntil).getTime() > Date.now()) {
+                    banner.style.display = 'none';
+                    return;
+                }
+
+                const lastExportRaw = localStorage.getItem('gym-tracker-last-export');
+                const lastExportDate = lastExportRaw ? new Date(lastExportRaw) : null;
+                const hasNewDataSinceExport = lastExportDate
+                    ? this.history.some(s => new Date(s.date) > lastExportDate)
+                    : this.history.length >= 3;
+
+                if (!hasNewDataSinceExport) {
+                    banner.style.display = 'none';
+                    return;
+                }
+
+                const daysSince = lastExportDate ? Math.floor((Date.now() - lastExportDate.getTime()) / 86400000) : null;
+                if (lastExportDate && daysSince < 10) {
+                    banner.style.display = 'none';
+                    return;
+                }
+
+                const msg = lastExportDate
+                    ? `Hace ${daysSince} días que no hacés un backup y tenés sesiones nuevas. Tus datos viven solo en este teléfono/navegador: si los borrás o cambiás de dispositivo, se pierden.`
+                    : 'Todavía no exportaste ningún backup y ya tenés varias sesiones cargadas. Tus datos viven solo en este teléfono/navegador.';
+
+                banner.style.display = 'block';
+                banner.innerHTML = `
+                    <div class="backup-reminder">
+                        ⚠️ ${msg}
+                        <div class="backup-reminder-actions">
+                            <button type="button" onclick="doBackupNow()">Exportar backup ahora</button>
+                            <button type="button" class="secondary" onclick="snoozeBackupReminder()">Recordar en 3 días</button>
+                        </div>
+                    </div>
+                `;
             }
         };
 
@@ -2033,6 +2114,7 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             app.showAlert('Datos exportados', 'success');
+            app.markBackupDone();
         };
 
         window.importData = function(event) {
@@ -2183,6 +2265,7 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             app.showAlert('CSV exportado', 'success');
+            app.markBackupDone();
         };
 
         window.clearAllData = function() {
@@ -2191,9 +2274,23 @@
                 app.history = [];
                 app.currentRoutine = null;
                 app.saveToStorage();
+                localStorage.removeItem('gym-tracker-last-export');
+                localStorage.removeItem('gym-tracker-backup-snooze-until');
                 app.showAlert('Datos borrados', 'success');
                 app.refreshTrack();
+                app.checkBackupReminder();
             }
+        };
+
+        window.doBackupNow = function() {
+            switchTab('settings');
+            exportData();
+        };
+
+        window.snoozeBackupReminder = function() {
+            const snoozeUntil = new Date(Date.now() + 3 * 86400000).toISOString();
+            localStorage.setItem('gym-tracker-backup-snooze-until', snoozeUntil);
+            app.checkBackupReminder();
         };
 
         app.init();
