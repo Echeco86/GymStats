@@ -2130,8 +2130,19 @@
                     i++;
                 }
 
-                if (nameTokens.length >= 1 && !nameTokens.every(t => EXERCISE_STOPWORDS.has(t)) && currentDay) {
-                    const name = nameTokens.join(' ');
+                // Recorta encabezados de columna (RPE, OBSERVACIONES, PAUSA...) pegados
+                // al principio o al final del bloque de mayúsculas: en varios layouts de
+                // PDF no queda un token en minúscula entre el encabezado y el nombre real
+                // del ejercicio siguiente, así que sin este recorte quedarían fundidos
+                // (p. ej. "RPE PRESS BANCA" en vez de "PRESS BANCA").
+                let nameStart = 0;
+                let nameEnd = nameTokens.length;
+                while (nameStart < nameEnd && EXERCISE_STOPWORDS.has(nameTokens[nameStart])) nameStart++;
+                while (nameEnd > nameStart && EXERCISE_STOPWORDS.has(nameTokens[nameEnd - 1])) nameEnd--;
+                const cleanNameTokens = nameTokens.slice(nameStart, nameEnd);
+
+                if (cleanNameTokens.length >= 1 && currentDay) {
+                    const name = cleanNameTokens.join(' ');
                     let repMin = 8, repMax = 12, sets = 3, unit = 'reps';
                     let pushIt = false;
 

@@ -93,6 +93,21 @@ test('extractExercisesByDay parsea un bloque de rutina con formato típico', () 
     assert.equal(press.repMax, 12);
 });
 
+test('extractExercisesByDay no pega encabezados de columna (RPE, OBSERVACIONES) al nombre del ejercicio', () => {
+    const { extractExercisesByDay } = loadApp();
+    // En este layout no hay ningún token en minúscula entre el encabezado de
+    // columna y el ejercicio siguiente, así que sin el recorte de stopwords
+    // "RPE" y "OBSERVACIONES" quedarían fundidos con el nombre real.
+    const text = 'PUSH DIA 1 Ord. Ejercicio Series Rep RPE PRESS BANCA 4 8-12 OBSERVACIONES SENTADILLA 3 10';
+    const days = extractExercisesByDay(text);
+    // Array.from() para obtener un array del realm del test: el array que
+    // devuelve el código evaluado en el vm.Context es de otro realm, y
+    // assert.deepEqual en modo estricto compara también el tipo del objeto.
+    const names = Array.from(days[0].exercises, e => e.name);
+
+    assert.deepEqual(names, ['PRESS BANCA', 'SENTADILLA']);
+});
+
 test('calculateRatioAnalysis marca un remo débil frente al teórico banca/sentadilla', () => {
     const { app, calculateRatioAnalysis } = loadApp();
     app.history = [{
