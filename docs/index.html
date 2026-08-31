@@ -715,6 +715,42 @@
             font-size: 12px;
         }
 
+        .rest-timer-card {
+            background: #0a1a2a;
+            border: 1px solid #1a3a4a;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .rest-timer-display {
+            font-size: 24px;
+            font-weight: 600;
+            color: #fff;
+            min-width: 64px;
+        }
+
+        .rest-timer-display.rest-timer-done {
+            color: #4ADE80;
+        }
+
+        .rest-timer-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .rest-timer-actions button {
+            width: auto;
+            padding: 8px 10px;
+            font-size: 12px;
+        }
+
         .bw-input-row {
             display: flex;
             gap: 8px;
@@ -886,6 +922,96 @@
             const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
             return String(str == null ? '' : str).replace(/[&<>"']/g, c => map[c]);
         }
+
+        const restTimer = { remaining: 0, duration: 90, intervalId: null, running: false, done: false };
+
+        function formatRestTime(totalSeconds) {
+            const s = Math.max(0, Math.ceil(totalSeconds));
+            const mm = Math.floor(s / 60);
+            const ss = s % 60;
+            return `${mm}:${String(ss).padStart(2, '0')}`;
+        }
+
+        function buildRestTimerHtml() {
+            const displayClass = restTimer.done ? 'rest-timer-display rest-timer-done' : 'rest-timer-display';
+            const timeText = restTimer.running || restTimer.done ? formatRestTime(restTimer.remaining) : '--:--';
+            return `
+                <div class="rest-timer-card">
+                    <div>
+                        <div id="restTimerDisplay" class="${displayClass}">${timeText}</div>
+                        <div style="font-size: 11px; color: #888; margin-top: 2px;">Descanso entre series</div>
+                    </div>
+                    <div class="rest-timer-actions">
+                        <button type="button" class="secondary" onclick="startRestTimer(60)">60s</button>
+                        <button type="button" class="secondary" onclick="startRestTimer(90)">90s</button>
+                        <button type="button" class="secondary" onclick="startRestTimer(120)">120s</button>
+                        <button type="button" class="secondary" onclick="startRestTimer(180)">180s</button>
+                        <button type="button" id="restTimerCancelBtn" class="secondary" onclick="stopRestTimer()" style="display: ${restTimer.running ? 'inline-block' : 'none'};">Cancelar</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function updateRestTimerDisplay() {
+            const el = document.getElementById('restTimerDisplay');
+            if (el) {
+                el.textContent = restTimer.running || restTimer.done ? formatRestTime(restTimer.remaining) : '--:--';
+                el.className = restTimer.done ? 'rest-timer-display rest-timer-done' : 'rest-timer-display';
+            }
+            const cancelBtn = document.getElementById('restTimerCancelBtn');
+            if (cancelBtn) cancelBtn.style.display = restTimer.running ? 'inline-block' : 'none';
+        }
+
+        function playRestTimerAlert() {
+            try {
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return;
+                const ctx = new AudioCtx();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.frequency.value = 880;
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                gain.gain.setValueAtTime(0.2, ctx.currentTime);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.4);
+                osc.onended = () => ctx.close();
+            } catch (e) {
+                console.error('No se pudo reproducir la alerta de descanso:', e);
+            }
+        }
+
+        window.startRestTimer = function(seconds) {
+            if (restTimer.intervalId) clearInterval(restTimer.intervalId);
+            restTimer.duration = seconds;
+            restTimer.remaining = seconds;
+            restTimer.running = true;
+            restTimer.done = false;
+            updateRestTimerDisplay();
+
+            restTimer.intervalId = setInterval(() => {
+                restTimer.remaining -= 1;
+                if (restTimer.remaining <= 0) {
+                    clearInterval(restTimer.intervalId);
+                    restTimer.intervalId = null;
+                    restTimer.running = false;
+                    restTimer.done = true;
+                    restTimer.remaining = 0;
+                    playRestTimerAlert();
+                }
+                updateRestTimerDisplay();
+            }, 1000);
+        };
+
+        window.stopRestTimer = function() {
+            if (restTimer.intervalId) clearInterval(restTimer.intervalId);
+            restTimer.intervalId = null;
+            restTimer.running = false;
+            restTimer.done = false;
+            restTimer.remaining = 0;
+            updateRestTimerDisplay();
+        };
 
         const app = {
             exercises: [],
@@ -1103,6 +1229,7 @@
                 this.history.push(sesion);
                 this.saveToStorage();
                 this.showAlert('✓ Sesión finalizada. Podés elegir otro día para la próxima', 'success');
+                stopRestTimer();
                 this.refreshTrack();
                 this.checkBackupReminder();
             },
@@ -2020,6 +2147,7 @@
             let html = `
                 <div class="alert">Sesión de ${new Date().toLocaleDateString('es-AR')}${this.selectedDay ? ' · ' + escapeHtml(this.selectedDay) : ''}</div>
                 ${daySelectorHtml}
+                ${buildRestTimerHtml()}
                 <form onsubmit="handleSubmitSesión(event)">
             `;
 
@@ -2162,6 +2290,13 @@
                         inp.value = value;
                     }
                 });
+            });
+
+            container.addEventListener('change', function(e) {
+                const target = e.target;
+                if (target.tagName !== 'INPUT' || !target.dataset.exercise) return;
+                if (target.dataset.field !== 'reps' || !target.value) return;
+                startRestTimer(restTimer.duration || 90);
             });
         };
 
