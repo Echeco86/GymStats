@@ -797,6 +797,7 @@
                     </div>
                     <input type="file" id="pdfInput" accept=".pdf" onchange="handlePDFUpload(event)">
                     <div id="uploadStatus" style="margin-top: 16px;"></div>
+                    <button type="button" class="secondary" onclick="openManualEditor()" style="margin-top: 16px;">✏️ Crear/editar rutina manualmente</button>
                 </div>
                 <div id="editExercisesContainer" style="display: none;">
                     <div class="alert">
@@ -806,6 +807,15 @@
                     <div style="margin-top: 16px; display: flex; gap: 8px;">
                         <button class="secondary" onclick="cancelEditExercises()" style="flex: 1;">Cancelar</button>
                         <button onclick="confirmEditExercises()" style="flex: 1;">Guardar cambios</button>
+                    </div>
+                </div>
+                <div id="manualEditContainer" style="display: none;">
+                    <div class="alert">Armá o editá tu rutina a mano: nombre, día, series y rango de reps.</div>
+                    <div id="manualEditList"></div>
+                    <button type="button" class="secondary" onclick="addManualExerciseRow()" style="margin-bottom: 12px;">+ Agregar ejercicio</button>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="secondary" onclick="cancelManualEdit()" style="flex: 1;">Cancelar</button>
+                        <button onclick="saveManualEdit()" style="flex: 1;">Guardar rutina</button>
                     </div>
                 </div>
             </div>
@@ -1375,6 +1385,137 @@
             uploadContainer.style.display = 'block';
             editContainer.style.display = 'none';
             document.getElementById('pdfInput').value = '';
+        };
+
+        function renderManualEditor() {
+            const list = document.getElementById('manualEditList');
+            if (!app._manualExercises.length) {
+                list.innerHTML = '<div class="empty-state">Sin ejercicios. Agregá el primero.</div>';
+                return;
+            }
+
+            let html = '';
+            app._manualExercises.forEach((item, i) => {
+                html += `
+                    <div class="exercise-edit-card" data-manual-idx="${i}">
+                        <div class="edit-card-header">
+                            <span class="edit-card-meta">Ejercicio ${i + 1}</span>
+                            <button type="button" class="remove-exercise-btn" onclick="removeManualExerciseRow(${i})">Eliminar</button>
+                        </div>
+                        <div class="edit-field">
+                            <label class="edit-label">Nombre</label>
+                            <input type="text" class="edit-input" data-manual-field="name" value="${escapeHtml(item.name || '')}">
+                        </div>
+                        <div class="edit-field">
+                            <label class="edit-label">Día (ej: Push, Pull, Piernas)</label>
+                            <input type="text" class="edit-input" data-manual-field="day" value="${escapeHtml(item.day || '')}">
+                        </div>
+                        <div class="edit-field" style="display: flex; gap: 8px;">
+                            <div style="flex: 1;">
+                                <label class="edit-label">Series</label>
+                                <input type="number" min="1" max="10" class="edit-input" data-manual-field="sets" value="${item.sets}">
+                            </div>
+                            <div style="flex: 1;">
+                                <label class="edit-label">Reps min</label>
+                                <input type="number" min="1" max="100" class="edit-input" data-manual-field="repMin" value="${item.repMin}">
+                            </div>
+                            <div style="flex: 1;">
+                                <label class="edit-label">Reps max</label>
+                                <input type="number" min="1" max="100" class="edit-input" data-manual-field="repMax" value="${item.repMax}">
+                            </div>
+                        </div>
+                        <div class="edit-field" style="display: flex; gap: 16px; align-items: center;">
+                            <label style="font-size: 12px; color: #aaa; display: flex; gap: 6px; align-items: center;">
+                                <input type="checkbox" data-manual-field="bodyweight" ${item.bodyweight ? 'checked' : ''}> Peso corporal
+                            </label>
+                            <label style="font-size: 12px; color: #aaa; display: flex; gap: 6px; align-items: center;">
+                                <input type="checkbox" data-manual-field="timeBased" ${item.unit === 'seg' ? 'checked' : ''}> Se mide en segundos
+                            </label>
+                        </div>
+                    </div>
+                `;
+            });
+            list.innerHTML = html;
+        }
+
+        function snapshotManualEditor() {
+            const cards = document.querySelectorAll('#manualEditList [data-manual-idx]');
+            cards.forEach(card => {
+                const idx = parseInt(card.dataset.manualIdx, 10);
+                const item = app._manualExercises[idx];
+                if (!item) return;
+                card.querySelectorAll('[data-manual-field]').forEach(input => {
+                    const field = input.dataset.manualField;
+                    if (field === 'bodyweight') item.bodyweight = input.checked;
+                    else if (field === 'timeBased') item.unit = input.checked ? 'seg' : 'reps';
+                    else if (field === 'sets' || field === 'repMin' || field === 'repMax') item[field] = input.value;
+                    else item[field] = input.value;
+                });
+            });
+        }
+
+        window.openManualEditor = function() {
+            document.getElementById('uploadContainer').style.display = 'none';
+            document.getElementById('editExercisesContainer').style.display = 'none';
+            document.getElementById('manualEditContainer').style.display = 'block';
+            app._manualExercises = app.exercises.map(e => ({ ...e }));
+            if (!app._manualExercises.length) {
+                app._manualExercises.push({ name: '', day: '', sets: 3, repMin: 8, repMax: 12, unit: 'reps', bodyweight: false });
+            }
+            renderManualEditor();
+        };
+
+        window.addManualExerciseRow = function() {
+            snapshotManualEditor();
+            const lastDay = app._manualExercises.length ? app._manualExercises[app._manualExercises.length - 1].day : '';
+            app._manualExercises.push({ name: '', day: lastDay || '', sets: 3, repMin: 8, repMax: 12, unit: 'reps', bodyweight: false });
+            renderManualEditor();
+        };
+
+        window.removeManualExerciseRow = function(idx) {
+            snapshotManualEditor();
+            app._manualExercises.splice(idx, 1);
+            renderManualEditor();
+        };
+
+        window.cancelManualEdit = function() {
+            document.getElementById('manualEditContainer').style.display = 'none';
+            document.getElementById('uploadContainer').style.display = 'block';
+        };
+
+        window.saveManualEdit = function() {
+            snapshotManualEditor();
+            const valid = app._manualExercises
+                .map(item => {
+                    let repMin = Math.max(1, parseInt(item.repMin, 10) || 8);
+                    let repMax = Math.max(1, parseInt(item.repMax, 10) || 12);
+                    if (repMin > repMax) { const t = repMin; repMin = repMax; repMax = t; }
+                    return {
+                        name: (item.name || '').trim(),
+                        day: (item.day || '').trim() || 'General',
+                        sets: Math.max(1, parseInt(item.sets, 10) || 3),
+                        repMin,
+                        repMax,
+                        unit: item.unit === 'seg' ? 'seg' : 'reps',
+                        bodyweight: !!item.bodyweight
+                    };
+                })
+                .filter(item => item.name.length > 0);
+
+            if (!valid.length) {
+                app.showAlert('Agregá al menos un ejercicio con nombre', 'error');
+                return;
+            }
+
+            app.exercises = valid;
+            app.currentRoutine = new Date().toISOString().split('T')[0];
+            app.selectedDay = valid[0].day;
+            app.saveToStorage();
+
+            document.getElementById('manualEditContainer').style.display = 'none';
+            document.getElementById('uploadContainer').style.display = 'block';
+            app.showAlert(`✓ ${valid.length} ejercicios guardados`, 'success');
+            switchTab('track');
         };
 
         window.estimateOneRM = function(weight, reps) {
