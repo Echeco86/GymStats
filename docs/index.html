@@ -1838,6 +1838,7 @@
             }
 
             let html = buildVolumePanelHtml(this.getWeeklyVolumeByMuscleGroup());
+            html += buildDeloadPanelHtml(this.getDeloadStatus());
 
             const analysis = calculateRatioAnalysis();
             if (!analysis || !Object.keys(analysis.exercises).length) {
@@ -1988,6 +1989,62 @@
                 `;
             }
             return html;
+        }
+
+        app.getWeeklySetsSeries = function() {
+            const buckets = {};
+            for (const sesion of this.history) {
+                const d = new Date(sesion.date);
+                const day = d.getDay();
+                const diffToMonday = (day === 0 ? -6 : 1 - day);
+                const monday = new Date(d);
+                monday.setDate(d.getDate() + diffToMonday);
+                monday.setHours(0, 0, 0, 0);
+                const key = monday.toISOString().split('T')[0];
+
+                const records = sesion.records || {};
+                let sets = 0;
+                for (const exSets of Object.values(records)) {
+                    if (Array.isArray(exSets)) sets += exSets.filter(s => s && s.weight != null && s.reps != null).length;
+                }
+                buckets[key] = (buckets[key] || 0) + sets;
+            }
+            return Object.entries(buckets)
+                .map(([weekStart, totalSets]) => ({ weekStart, totalSets }))
+                .sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+        };
+
+        app.getDeloadStatus = function() {
+            const weeks = this.getWeeklySetsSeries();
+            if (weeks.length < 3) return null;
+
+            let streak = 0;
+            let lastDeloadWeek = null;
+            for (let i = weeks.length - 1; i >= 0; i--) {
+                const trailing = weeks.slice(Math.max(0, i - 4), i);
+                const avg = trailing.length ? trailing.reduce((s, w) => s + w.totalSets, 0) / trailing.length : weeks[i].totalSets;
+                const isDeload = trailing.length >= 2 && weeks[i].totalSets < avg * 0.6;
+                if (isDeload) { lastDeloadWeek = weeks[i].weekStart; break; }
+                streak++;
+            }
+            return { weeksSinceDeload: streak, lastDeloadWeek, totalWeeksTracked: weeks.length };
+        };
+
+        function buildDeloadPanelHtml(status) {
+            if (!status || status.weeksSinceDeload < 6) return '';
+            const { weeksSinceDeload } = status;
+
+            const color = weeksSinceDeload >= 8 ? '#ff6b6b' : '#fbbf24';
+            const label = weeksSinceDeload >= 8
+                ? `🔴 Llevás ${weeksSinceDeload} semanas acumulando sin descarga. Se recomienda programar una semana de descarga ahora (bajar volumen ~40-50%).`
+                : `⚠️ Van ${weeksSinceDeload} semanas de acumulación. Estás en la ventana recomendada (6-8 semanas) para programar una descarga pronto.`;
+
+            return `
+                <div class="ratio-card" style="margin-top: 12px;">
+                    <div class="ratio-exercise">Semana de descarga</div>
+                    <div class="ratio-status" style="color: ${color}; margin-top: 6px;">${label}</div>
+                </div>
+            `;
         }
 
         function slugifyExercise(name) {
