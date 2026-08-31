@@ -2228,8 +2228,66 @@
                 `;
             }
             html += '</div>';
+
+            html += '<div style="font-size: 12px; color: #888; margin: 20px 0 12px; font-weight: 500;">Progresión de 1RM estimado</div>';
+            let anyChart = false;
+            for (const ex of this.exercises) {
+                const series = this.getExerciseE1RMSeries(ex.name, 20);
+                if (series.length < 2) continue;
+                anyChart = true;
+                const values = series.map(p => p.e1rm);
+                const first = values[0];
+                const lastVal = values[values.length - 1];
+                const changePct = first ? ((lastVal - first) / first) * 100 : 0;
+                const changeColor = changePct > 0.5 ? '#4ADE80' : changePct < -0.5 ? '#ff6b6b' : '#888';
+
+                html += `
+                    <div class="bw-chart-card">
+                        <div class="ratio-header">
+                            <div>
+                                <div class="ratio-exercise">${escapeHtml(ex.name)}</div>
+                                <div class="ratio-1rm">${lastVal.toFixed(1)} kg 1RM estimado</div>
+                            </div>
+                            <div style="font-size: 11px; color: ${changeColor};">${changePct >= 0 ? '+' : ''}${changePct.toFixed(1)}%</div>
+                        </div>
+                        ${buildSparklineSvg(values)}
+                    </div>
+                `;
+            }
+            if (!anyChart) {
+                html += '<div class="no-data-message">Registrá al menos 2 sesiones del mismo ejercicio para ver su curva de progresión</div>';
+            }
+
             container.innerHTML = html;
         };
+
+        app.getExerciseE1RMSeries = function(exerciseName, maxPoints = 20) {
+            const sorted = [...this.history].sort((a, b) => a.date.localeCompare(b.date));
+            const points = [];
+            for (const sesion of sorted) {
+                const sets = sesion.records && sesion.records[exerciseName];
+                const top = this.topSetOf(sets);
+                if (top) points.push({ date: sesion.date, e1rm: estimateOneRM(top.weight, top.reps) });
+            }
+            return points.slice(-maxPoints);
+        };
+
+        function buildSparklineSvg(values, opts = {}) {
+            const height = opts.height || 36;
+            const color = opts.color || '#007AFF';
+            if (values.length < 2) return '';
+            const width = 100;
+            const pad = 2;
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const range = (max - min) || 1;
+            const xStep = (width - pad * 2) / (values.length - 1);
+            const scaleY = (v) => height - pad - ((v - min) / range) * (height - pad * 2);
+            const points = values.map((v, i) => `${(pad + i * xStep).toFixed(1)},${scaleY(v).toFixed(1)}`).join(' ');
+            return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%; height:${height}px; display:block; margin-top:8px;">
+                <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" />
+            </svg>`;
+        }
 
         app.addBodyweightEntry = function(weight, waist) {
             const today = new Date().toISOString().split('T')[0];
