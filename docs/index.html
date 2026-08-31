@@ -968,23 +968,41 @@
                     };
                 }
 
+                const wentToFailure = last.rir === 0;
+                const hadRoomToSpare = last.rir != null && last.rir >= 4;
+
                 if (last.reps >= range.repMax) {
-                    const increment = this.weightIncrement(last.weight, ex.bodyweight);
+                    let increment = this.weightIncrement(last.weight, ex.bodyweight);
+                    if (hadRoomToSpare) increment *= 1.5;
+                    else if (wentToFailure) increment *= 0.5;
                     const nextWeight = Math.round((last.weight + increment) * 2) / 2;
+                    const rirNote = wentToFailure ? ' (subida chica: llegaste al fallo la vez pasada)'
+                        : hadRoomToSpare ? ' (subida más grande: te sobraron reps en reserva)' : '';
                     return {
                         weight: nextWeight,
                         reps: range.repMin,
-                        message: ex.bodyweight
+                        message: (ex.bodyweight
                             ? `Llegaste a ${range.repMax} ${unitWord}. Sumá lastre (${nextWeight} kg extra) y volvé a ${range.repMin} ${unitWord}`
-                            : `Llegaste a ${range.repMax} ${unitWord}. Subí el peso y volvé a ${range.repMin} ${unitWord}`
+                            : `Llegaste a ${range.repMax} ${unitWord}. Subí el peso y volvé a ${range.repMin} ${unitWord}`) + rirNote
                     };
                 }
 
-                const nextReps = Math.min(last.reps + 1, range.repMax);
+                if (wentToFailure) {
+                    const weightLabel = ex.bodyweight ? ' kg extra' : ' kg';
+                    return {
+                        weight: last.weight,
+                        reps: last.reps,
+                        message: `Fuiste al fallo (RIR 0) sin llegar a ${range.repMax} ${unitWord}. Repetí ${last.weight}${weightLabel} × ${last.reps} ${unitWord} antes de sumar reps`
+                    };
+                }
+
+                const repIncrement = hadRoomToSpare ? 2 : 1;
+                const nextReps = Math.min(last.reps + repIncrement, range.repMax);
+                const rirNote = hadRoomToSpare ? ' (te sobró margen, subí un poco más de lo habitual)' : '';
                 return {
                     weight: last.weight,
                     reps: nextReps,
-                    message: `Mismo peso, buscá superar los ${last.reps} ${unitWord} de la vez pasada`
+                    message: `Mismo peso, buscá superar los ${last.reps} ${unitWord} de la vez pasada${rirNote}`
                 };
             },
 
