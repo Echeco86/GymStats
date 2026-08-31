@@ -592,16 +592,50 @@
             width: 20px;
         }
 
-        .set-controls {
+        .sets-counter {
             display: flex;
-            gap: 8px;
+            align-items: center;
+            gap: 10px;
             margin-top: 8px;
+            margin-bottom: 4px;
         }
 
-        .set-controls button {
-            font-size: 11px;
-            padding: 6px 10px;
+        .sets-counter-btn {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border-radius: 8px;
+            font-size: 16px;
+            line-height: 1;
+            background: var(--surface-alt);
+            color: var(--accent);
+            border: 1px solid var(--border-strong);
+        }
+
+        .sets-counter-btn:disabled {
+            opacity: 0.4;
+        }
+
+        .sets-counter-value {
+            font-size: 13px;
+            color: var(--text);
+            font-weight: 500;
+            min-width: 60px;
+        }
+
+        .set-overrides-toggle {
             width: auto;
+            background: none;
+            border: none;
+            padding: 4px 0;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 500;
+            text-decoration: underline;
+        }
+
+        .set-overrides {
+            margin-top: 4px;
         }
 
         .suggestion-hint {
@@ -2281,33 +2315,54 @@
                         <div class="suggestion-hint">${target.message}</div>
                         ${stagnant ? '<div class="stagnation-hint">⚠️ Sin progreso en 3 sesiones. Considera cambiar el estímulo.</div>' : ''}
                         ${weakHint ? `<div class="volume-hint">📊 ${weakHint}</div>` : ''}
-                `;
 
-                for (let s = 0; s < setsCount; s++) {
-                    html += `
-                        <div class="weight-input-group">
-                            <span class="set-number">S${s + 1}</span>
-                            <input type="number" step="0.5" min="0" max="999"
-                                   data-exercise="${escapeHtml(ex.name)}" data-field="weight" data-set="${s}" placeholder="${target.weight} ${weightLabel}">
-                            <span class="unit">${weightLabel}</span>
-                            <input type="number" step="1" min="0" max="999"
-                                   data-exercise="${escapeHtml(ex.name)}" data-field="reps" data-set="${s}" placeholder="${target.reps} ${unitLabel}" style="width: 70px;">
-                            <span class="unit">${unitLabel}</span>
-                            <input type="number" step="1" min="0" max="5"
-                                   data-exercise="${escapeHtml(ex.name)}" data-field="rir" data-set="${s}" placeholder="RIR" style="width: 55px;">
-                            <span class="unit">RIR</span>
-                            ${s === 0 ? `<button type="button" class="use-suggested-btn" onclick="useSuggested(${exIdx}, ${target.weight}, ${target.reps})">Usar sugerido</button>` : ''}
+                        <div class="sets-counter">
+                            <button type="button" class="sets-counter-btn" onclick="removeSetRow(${exIdx})" ${setsCount <= 1 ? 'disabled' : ''}>−</button>
+                            <span class="sets-counter-value">${setsCount} serie${setsCount === 1 ? '' : 's'}</span>
+                            <button type="button" class="sets-counter-btn" onclick="addSetRow(${exIdx})">+</button>
                         </div>
-                    `;
-                }
+                `;
 
                 html += `
-                        <div class="set-controls">
-                            <button type="button" class="secondary" onclick="addSetRow(${exIdx})">+ agregar serie</button>
-                            ${setsCount > 1 ? `<button type="button" class="secondary" onclick="removeSetRow(${exIdx})">- quitar serie</button>` : ''}
+                        <div class="weight-input-group">
+                            <span class="set-number">S1</span>
+                            <input type="number" step="0.5" min="0" max="999"
+                                   data-exercise="${escapeHtml(ex.name)}" data-field="weight" data-set="0" placeholder="${target.weight} ${weightLabel}">
+                            <span class="unit">${weightLabel}</span>
+                            <input type="number" step="1" min="0" max="999"
+                                   data-exercise="${escapeHtml(ex.name)}" data-field="reps" data-set="0" placeholder="${target.reps} ${unitLabel}" style="width: 70px;">
+                            <span class="unit">${unitLabel}</span>
+                            <input type="number" step="1" min="0" max="5"
+                                   data-exercise="${escapeHtml(ex.name)}" data-field="rir" data-set="0" placeholder="RIR" style="width: 55px;">
+                            <span class="unit">RIR</span>
+                            <button type="button" class="use-suggested-btn" onclick="useSuggested(${exIdx}, ${target.weight}, ${target.reps})">Usar sugerido</button>
                         </div>
-                    </div>
                 `;
+
+                if (setsCount > 1) {
+                    const overridesOpen = !!(this._openSetOverrides && this._openSetOverrides[ex.name]);
+                    html += `<button type="button" class="set-overrides-toggle" id="set-overrides-toggle-${exIdx}" onclick="toggleSetOverrides(${exIdx})">${overridesOpen ? 'Ocultar series individuales' : '¿Alguna serie salió diferente?'}</button>`;
+                    html += `<div class="set-overrides" id="set-overrides-${exIdx}" style="display: ${overridesOpen ? 'block' : 'none'};">`;
+                    for (let s = 1; s < setsCount; s++) {
+                        html += `
+                            <div class="weight-input-group">
+                                <span class="set-number">S${s + 1}</span>
+                                <input type="number" step="0.5" min="0" max="999"
+                                       data-exercise="${escapeHtml(ex.name)}" data-field="weight" data-set="${s}" placeholder="${target.weight} ${weightLabel}">
+                                <span class="unit">${weightLabel}</span>
+                                <input type="number" step="1" min="0" max="999"
+                                       data-exercise="${escapeHtml(ex.name)}" data-field="reps" data-set="${s}" placeholder="${target.reps} ${unitLabel}" style="width: 70px;">
+                                <span class="unit">${unitLabel}</span>
+                                <input type="number" step="1" min="0" max="5"
+                                       data-exercise="${escapeHtml(ex.name)}" data-field="rir" data-set="${s}" placeholder="RIR" style="width: 55px;">
+                                <span class="unit">RIR</span>
+                            </div>
+                        `;
+                    }
+                    html += `</div>`;
+                }
+
+                html += `</div>`;
                 exIdx++;
             }
 
@@ -2376,6 +2431,20 @@
             if (!ex) return;
             document.querySelectorAll(`input[data-exercise="${CSS.escape(ex.name)}"][data-field="weight"]`).forEach(inp => inp.value = weight);
             document.querySelectorAll(`input[data-exercise="${CSS.escape(ex.name)}"][data-field="reps"]`).forEach(inp => inp.value = reps);
+        };
+
+        window.toggleSetOverrides = function(exIdx) {
+            const ex = app._trackExercises && app._trackExercises[exIdx];
+            const container = document.getElementById(`set-overrides-${exIdx}`);
+            const toggleBtn = document.getElementById(`set-overrides-toggle-${exIdx}`);
+            if (!container) return;
+            const willOpen = container.style.display === 'none';
+            container.style.display = willOpen ? 'block' : 'none';
+            if (toggleBtn) toggleBtn.textContent = willOpen ? 'Ocultar series individuales' : '¿Alguna serie salió diferente?';
+            if (ex) {
+                if (!app._openSetOverrides) app._openSetOverrides = {};
+                app._openSetOverrides[ex.name] = willOpen;
+            }
         };
 
         window.setupSetPropagation = function() {
