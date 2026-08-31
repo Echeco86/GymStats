@@ -1,0 +1,8 @@
+{
+  "name": "gym-tracker",
+  "private": true,
+  "description": "PWA de seguimiento de entrenamiento. docs/ es lo que publica GitHub Pages; este package.json solo existe para correr los tests.",
+  "scripts": {
+    "test": "node --test tests/pure-functions.test.js"
+  }
+}

@@ -15,3 +15,15 @@ docs/                    ← esto es lo que se publica (GitHub Pages sirve desde
 └── pdf.worker.min.js      worker de pdf.js
 ```
 
+## Tests
+
+Hay tests para las funciones puras del script inline de `docs/index.html`
+(estimación de 1RM, detección de estancamiento, parser de PDF, clasificación
+por grupo muscular, análisis de ratios de fuerza, volumen semanal, deload).
+No hace falta ningún build ni dependencia: corren sobre el runner de tests
+integrado de Node.
+
+```
+npm test
+```
+
