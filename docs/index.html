@@ -956,6 +956,10 @@
             return String(str == null ? '' : str).replace(/[&<>"']/g, c => map[c]);
         }
 
+        // Se incrementa cuando cambia la forma del JSON exportado (export/import),
+        // para poder detectar backups de una versión futura de la app.
+        const BACKUP_SCHEMA_VERSION = 1;
+
         const restTimer = { remaining: 0, duration: 90, intervalId: null, running: false, done: false };
 
         function formatRestTime(totalSeconds) {
@@ -2816,6 +2820,7 @@
 
         window.exportData = function() {
             const data = {
+                schemaVersion: BACKUP_SCHEMA_VERSION,
                 exercises: app.exercises,
                 history: app.history,
                 bodyweightLog: app.bodyweightLog,
@@ -2850,6 +2855,18 @@
                     if (!incomingExercises.length && !incomingHistory.length && !incomingBodyweight.length) {
                         app.showAlert('El archivo no tiene datos reconocibles', 'error');
                         return;
+                    }
+
+                    // parsed.schemaVersion no existe en backups de antes de que se agregara
+                    // este campo: son compatibles con el formato actual, no hace falta avisar.
+                    if (parsed.schemaVersion > BACKUP_SCHEMA_VERSION) {
+                        const proceed = confirm(
+                            `Este backup fue exportado por una versión más nueva de la app ` +
+                            `(formato v${parsed.schemaVersion}, esta app entiende hasta v${BACKUP_SCHEMA_VERSION}).\n\n` +
+                            `Podría faltar importar datos nuevos que esta versión no reconoce.\n\n` +
+                            `¿Igual querés continuar?`
+                        );
+                        if (!proceed) return;
                     }
 
                     const hasExistingData = app.exercises.length > 0 || app.history.length > 0 || app.bodyweightLog.length > 0;

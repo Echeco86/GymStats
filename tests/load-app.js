@@ -20,7 +20,10 @@ const EXPORTS = [
     'extractExercisesByDay',
     'slugifyExercise',
     'calculateRatioAnalysis',
-    'buildSparklineSvg'
+    'buildSparklineSvg',
+    'exportData',
+    'importData',
+    'BACKUP_SCHEMA_VERSION'
 ];
 
 function makeLocalStorage() {
@@ -37,7 +40,11 @@ function makeLocalStorage() {
 // contexto vm aislado, con stubs mínimos de document/navigator/localStorage.
 // Cada llamada devuelve una instancia nueva e independiente: nada se comparte
 // entre tests.
-function loadApp() {
+//
+// `overrides.sandbox` permite agregar/pisar globals del contexto (por ej.
+// confirm, FileReader, Blob, URL) para tests que ejercitan flujos como
+// exportar/importar un backup.
+function loadApp(overrides = {}) {
     const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
     const match = html.match(/<script>([\s\S]*?)<\/script>/);
     if (!match) {
@@ -50,13 +57,27 @@ function loadApp() {
 
     const sandbox = {
         console,
+        // No-ops: nada en los tests depende de que un setTimeout/setInterval
+        // real llegue a dispararse (p. ej. el auto-hide de showAlert), y
+        // dejarlos "reales" mantiene vivo el proceso de test innecesariamente.
+        setTimeout: () => 0,
+        clearTimeout: () => {},
+        setInterval: () => 0,
+        clearInterval: () => {},
         navigator: {},
         localStorage: makeLocalStorage(),
         document: {
-            getElementById: () => null,
+            // Un elemento "de mentira" genérico alcanza para código que solo
+            // hace show/hide o pisa innerHTML (p. ej. showAlert). Los tests que
+            // necesitan inspeccionar el HTML resultante de un id puntual pasan
+            // su propio stub via overrides.sandbox.document.
+            getElementById: () => ({ style: {}, innerHTML: '', value: '' }),
             querySelectorAll: () => [],
-            addEventListener: () => {}
-        }
+            addEventListener: () => {},
+            createElement: () => ({ style: {}, click() {}, remove() {} }),
+            body: { appendChild() {}, removeChild() {} }
+        },
+        ...overrides.sandbox
     };
     vm.createContext(sandbox);
 

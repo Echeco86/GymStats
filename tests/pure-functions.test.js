@@ -164,3 +164,70 @@ test('getDeloadStatus cuenta las semanas de acumulación desde la última descar
     app.history = buildHistory([15, 15, 4, 15, 15, 15, 15, 15, 15]);
     assert.equal(app.getDeloadStatus().weeksSinceDeload, 6);
 });
+
+function loadAppWithBackupIO(confirmQueue, backupJson) {
+    class FakeFileReader {
+        readAsText() { this.onload({ target: { result: backupJson } }); }
+    }
+    let capturedExport = null;
+    const { app, exportData, importData, BACKUP_SCHEMA_VERSION } = loadApp({
+        sandbox: {
+            confirm: () => confirmQueue.shift(),
+            FileReader: FakeFileReader,
+            URL: { createObjectURL: () => 'blob:fake', revokeObjectURL: () => {} },
+            Blob: function Blob(parts) { capturedExport = parts[0]; }
+        }
+    });
+    return {
+        app, exportData, importData, BACKUP_SCHEMA_VERSION,
+        getExportedJson: () => capturedExport
+    };
+}
+
+test('exportData estampa la versión de esquema del backup', () => {
+    const { app, exportData, getExportedJson, BACKUP_SCHEMA_VERSION } = loadAppWithBackupIO([]);
+    app.exercises = [{ name: 'Sentadilla' }];
+    app.history = [];
+
+    exportData();
+
+    const exported = JSON.parse(getExportedJson());
+    assert.equal(exported.schemaVersion, BACKUP_SCHEMA_VERSION);
+});
+
+test('importData avisa antes de importar un backup de una versión de esquema futura, y respeta la cancelación', () => {
+    const { BACKUP_SCHEMA_VERSION } = loadAppWithBackupIO([]);
+    const futureBackup = JSON.stringify({
+        schemaVersion: BACKUP_SCHEMA_VERSION + 1,
+        exercises: [{ name: 'Peso muerto' }],
+        history: []
+    });
+
+    // El usuario cancela el aviso de versión futura: no debería tocar los datos existentes.
+    const { app, importData } = loadAppWithBackupIO([false], futureBackup);
+    app.exercises = [{ name: 'Sentadilla' }];
+    app.history = [];
+
+    importData({ target: { files: [{}], value: '' } });
+
+    assert.deepEqual(Array.from(app.exercises, e => e.name), ['Sentadilla']);
+});
+
+test('importData reemplaza los datos si el usuario acepta el aviso de versión futura y elige reemplazar', () => {
+    const { BACKUP_SCHEMA_VERSION } = loadAppWithBackupIO([]);
+    const futureBackup = JSON.stringify({
+        schemaVersion: BACKUP_SCHEMA_VERSION + 1,
+        exercises: [{ name: 'Peso muerto' }],
+        history: []
+    });
+
+    // true = seguir a pesar del aviso de versión futura; false = "Cancelar" en el
+    // diálogo fusionar/reemplazar, que en esa confirmación significa REEMPLAZAR.
+    const { app, importData } = loadAppWithBackupIO([true, false], futureBackup);
+    app.exercises = [{ name: 'Sentadilla' }];
+    app.history = [];
+
+    importData({ target: { files: [{}], value: '' } });
+
+    assert.deepEqual(Array.from(app.exercises, e => e.name), ['Peso muerto']);
+});
