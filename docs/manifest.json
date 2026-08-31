@@ -1,0 +1,66 @@
+{
+  "name": "GYM Tracker - Seguimiento de Pesos",
+  "short_name": "GYM Tracker",
+  "description": "Aplicación de seguimiento de pesos y progresión de entrenamiento en el gimnasio",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#000000",
+  "background_color": "#000000",
+  "categories": ["fitness", "health"],
+  "screenshots": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'><rect fill='%23000'/><text x='270' y='360' font-size='200' text-anchor='middle' fill='%23007AFF' dominant-baseline='middle'>💪</text></svg>",
+      "sizes": "540x720",
+      "type": "image/svg+xml",
+      "form_factor": "narrow"
+    }
+  ],
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23000' width='192' height='192'/><text x='96' y='120' font-size='100' font-weight='bold' fill='%23fff' text-anchor='middle'>💪</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23000' width='192' height='192' rx='40'/><text x='96' y='120' font-size='100' font-weight='bold' fill='%23fff' text-anchor='middle'>💪</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect fill='%23000' width='512' height='512'/><text x='256' y='320' font-size='280' font-weight='bold' fill='%23fff' text-anchor='middle'>💪</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nueva sesión",
+      "short_name": "Sesión",
+      "description": "Registrar una nueva sesión de entrenamiento",
+      "url": "./index.html?tab=track",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23007AFF' width='192' height='192' rx='40'/><text x='96' y='120' font-size='100' font-weight='bold' fill='%23fff' text-anchor='middle'>✓</text></svg>",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Ver historial",
+      "short_name": "Historial",
+      "description": "Ver historial de entrenamientos",
+      "url": "./index.html?tab=history",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23007AFF' width='192' height='192' rx='40'/><text x='96' y='120' font-size='100' font-weight='bold' fill='%23fff' text-anchor='middle'>📊</text></svg>",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}
