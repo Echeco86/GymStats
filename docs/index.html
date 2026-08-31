@@ -775,6 +775,10 @@
                     <button class="secondary" onclick="exportData()">Exportar respaldo completo (JSON)</button>
                 </div>
                 <div class="form-group">
+                    <input type="file" id="importFileInput" accept="application/json" style="display:none" onchange="importData(event)">
+                    <button class="secondary" onclick="document.getElementById('importFileInput').click()">Importar respaldo (JSON)</button>
+                </div>
+                <div class="form-group">
                     <button class="secondary" onclick="clearAllData()">Borrar todos los datos</button>
                 </div>
                 <div class="info-box" style="margin-top: 24px;">
@@ -2010,6 +2014,65 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             app.showAlert('Datos exportados', 'success');
+        };
+
+        window.importData = function(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    const incomingExercises = Array.isArray(parsed.exercises) ? parsed.exercises : [];
+                    const incomingHistory = Array.isArray(parsed.history) ? parsed.history : [];
+
+                    if (!incomingExercises.length && !incomingHistory.length) {
+                        app.showAlert('El archivo no tiene datos reconocibles', 'error');
+                        return;
+                    }
+
+                    const hasExistingData = app.exercises.length > 0 || app.history.length > 0;
+                    const doMerge = hasExistingData
+                        ? confirm('Ya hay datos en esta app.\n\nAceptar = FUSIONAR (agrega lo del archivo sin borrar lo actual, evitando duplicados por fecha+día).\nCancelar = REEMPLAZAR TODO por el contenido del archivo.')
+                        : true;
+
+                    if (doMerge && hasExistingData) {
+                        // Fusionar ejercicios (por nombre)
+                        for (const ex of incomingExercises) {
+                            if (!app.exercises.some(e => e.name === ex.name)) {
+                                app.exercises.push(ex);
+                            }
+                        }
+                        // Fusionar sesiones (por fecha+día, para evitar duplicar la misma sesión)
+                        let added = 0;
+                        for (const sesion of incomingHistory) {
+                            const dup = app.history.some(h => h.date === sesion.date && h.day === sesion.day);
+                            if (!dup) {
+                                app.history.push(sesion);
+                                added++;
+                            }
+                        }
+                        app.history.sort((a, b) => a.date.localeCompare(b.date));
+                        app.saveToStorage();
+                        app.showAlert(`Importado: ${added} sesión(es) nueva(s) agregadas`, 'success');
+                    } else {
+                        app.exercises = incomingExercises;
+                        app.history = incomingHistory;
+                        app.currentRoutine = parsed.currentRoutine || app.currentRoutine || null;
+                        app.saveToStorage();
+                        app.showAlert('Datos reemplazados desde el archivo', 'success');
+                    }
+
+                    app.refreshTrack();
+                } catch (err) {
+                    console.error('Error importing data:', err);
+                    app.showAlert('Error al leer el archivo. ¿Es un JSON válido de esta app?', 'error');
+                } finally {
+                    event.target.value = '';
+                }
+            };
+            reader.readAsText(file);
         };
 
         window.exportCSV = function() {
