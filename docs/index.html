@@ -715,6 +715,47 @@
             font-size: 12px;
         }
 
+        .bw-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .bw-input-row .form-group {
+            margin-bottom: 0;
+            flex: 1;
+            min-width: 90px;
+        }
+
+        .bw-input-row button {
+            width: auto;
+            padding: 10px 14px;
+        }
+
+        .bw-chart-card {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+
+        .bw-trend {
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        .bw-history-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #aaa;
+            padding: 6px 0;
+            border-bottom: 1px solid #1a1a1a;
+        }
+
         .no-data-message {
             text-align: center;
             padding: 32px 16px;
@@ -735,6 +776,7 @@
             <button class="nav-tab" onclick="switchTab('history')">Historial</button>
             <button class="nav-tab" onclick="switchTab('stats')">Stats</button>
             <button class="nav-tab" onclick="switchTab('analysis')">Análisis</button>
+            <button class="nav-tab" onclick="switchTab('bodyweight')">Peso</button>
             <button class="nav-tab" onclick="switchTab('settings')">Config</button>
         </div>
 
@@ -788,6 +830,11 @@
                 <div id="analysisList"></div>
             </div>
 
+            <!-- BODYWEIGHT -->
+            <div id="bodyweight" class="section">
+                <div id="bodyweightList"></div>
+            </div>
+
             <!-- SETTINGS -->
             <div id="settings" class="section">
                 <div class="alert">
@@ -836,6 +883,7 @@
             currentRoutine: null,
             selectedDay: null,
             tempExercises: [],
+            bodyweightLog: [],
 
             init() {
                 this.loadFromStorage();
@@ -887,6 +935,7 @@
                         this.history = parsed.history || [];
                         this.currentRoutine = parsed.currentRoutine || null;
                         this.selectedDay = parsed.selectedDay || (this.exercises[0] && this.exercises[0].day) || null;
+                        this.bodyweightLog = parsed.bodyweightLog || [];
                     }
                 } catch (e) {
                     console.error('Error loading data:', e);
@@ -899,7 +948,8 @@
                         exercises: this.exercises,
                         history: this.history,
                         currentRoutine: this.currentRoutine,
-                        selectedDay: this.selectedDay
+                        selectedDay: this.selectedDay,
+                        bodyweightLog: this.bodyweightLog
                     };
                     localStorage.setItem('gym-tracker-data', JSON.stringify(data));
                 } catch (e) {
@@ -1793,6 +1843,7 @@
             if (tab === 'history') app.refreshHistory();
             if (tab === 'stats') app.refreshStats();
             if (tab === 'analysis') app.refreshAnalysis();
+            if (tab === 'bodyweight') app.refreshBodyweight();
         };
 
         app.refreshTrack = function() {
@@ -2180,10 +2231,159 @@
             container.innerHTML = html;
         };
 
+        app.addBodyweightEntry = function(weight, waist) {
+            const today = new Date().toISOString().split('T')[0];
+            const existing = this.bodyweightLog.find(e => e.date === today);
+            if (existing) {
+                existing.weight = weight;
+                existing.waist = waist;
+            } else {
+                this.bodyweightLog.push({ date: today, weight, waist });
+            }
+            this.bodyweightLog.sort((a, b) => a.date.localeCompare(b.date));
+            this.saveToStorage();
+            this.showAlert('✓ Peso guardado', 'success');
+            this.refreshBodyweight();
+        };
+
+        app.getBodyweightMovingAverage = function(windowDays = 7) {
+            const sorted = [...this.bodyweightLog].sort((a, b) => a.date.localeCompare(b.date));
+            return sorted.map(entry => {
+                const entryDate = new Date(entry.date);
+                const cutoff = new Date(entryDate);
+                cutoff.setDate(cutoff.getDate() - (windowDays - 1));
+                const windowEntries = sorted.filter(e => {
+                    const d = new Date(e.date);
+                    return d >= cutoff && d <= entryDate;
+                });
+                const avg = windowEntries.reduce((sum, e) => sum + e.weight, 0) / windowEntries.length;
+                return { date: entry.date, avg };
+            });
+        };
+
+        app.refreshBodyweight = function() {
+            const container = document.getElementById('bodyweightList');
+            const sorted = [...this.bodyweightLog].sort((a, b) => a.date.localeCompare(b.date));
+            const today = new Date().toISOString().split('T')[0];
+            const todayEntry = sorted.find(e => e.date === today);
+
+            let html = `
+                <div class="alert">Registrá tu peso corporal. Lo que importa es la tendencia semanal, no el número de un día suelto.</div>
+                <div class="bw-input-row">
+                    <div class="form-group">
+                        <label class="form-label">Peso hoy (kg)</label>
+                        <input type="number" step="0.1" min="0" max="400" id="bwWeightInput" value="${todayEntry ? todayEntry.weight : ''}" style="width:100%;">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Cintura (cm, opcional)</label>
+                        <input type="number" step="0.1" min="0" max="300" id="bwWaistInput" value="${todayEntry && todayEntry.waist != null ? todayEntry.waist : ''}" style="width:100%;">
+                    </div>
+                    <button type="button" onclick="saveBodyweightEntry()">Guardar</button>
+                </div>
+            `;
+
+            if (sorted.length < 2) {
+                html += '<div class="no-data-message">Cargá al menos un par de días para empezar a ver la tendencia</div>';
+                container.innerHTML = html;
+                return;
+            }
+
+            const movingAvg = this.getBodyweightMovingAverage(7);
+            const latestAvg = movingAvg[movingAvg.length - 1];
+            const targetDate = new Date(latestAvg.date);
+            targetDate.setDate(targetDate.getDate() - 7);
+            let prevAvgEntry = null;
+            for (let i = movingAvg.length - 1; i >= 0; i--) {
+                if (new Date(movingAvg[i].date) <= targetDate) { prevAvgEntry = movingAvg[i]; break; }
+            }
+            const weeklyChangePct = prevAvgEntry ? ((latestAvg.avg - prevAvgEntry.avg) / prevAvgEntry.avg) * 100 : null;
+            const trend = classifyWeightTrend(weeklyChangePct);
+
+            html += `
+                <div class="bw-chart-card">
+                    ${buildBodyweightChartSvg(sorted.slice(-60), movingAvg.slice(-60))}
+                    <div class="stats-grid" style="margin-top: 12px;">
+                        <div class="stat-card">
+                            <div class="stat-label">Media móvil 7 días</div>
+                            <div class="stat-value">${latestAvg.avg.toFixed(1)} kg</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Último registrado</div>
+                            <div class="stat-value">${sorted[sorted.length - 1].weight} kg</div>
+                        </div>
+                    </div>
+                    ${trend ? `<div class="bw-trend" style="color: ${trend.color};">${trend.label}${weeklyChangePct != null ? ` (${weeklyChangePct >= 0 ? '+' : ''}${weeklyChangePct.toFixed(2)}%/semana)` : ''}</div>` : ''}
+                </div>
+            `;
+
+            html += '<div style="font-size: 12px; color: #888; margin-bottom: 8px; font-weight: 500;">Últimos registros</div>';
+            for (let i = sorted.length - 1; i >= Math.max(0, sorted.length - 14); i--) {
+                const e = sorted[i];
+                const dateLabel = new Date(e.date).toLocaleDateString('es-AR');
+                html += `
+                    <div class="bw-history-row">
+                        <span>${dateLabel}</span>
+                        <span>${e.weight} kg${e.waist != null && e.waist !== '' ? ` · cintura ${e.waist} cm` : ''}</span>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        };
+
+        window.saveBodyweightEntry = function() {
+            const weightInput = document.getElementById('bwWeightInput');
+            const waistInput = document.getElementById('bwWaistInput');
+            const weight = weightInput.value ? parseFloat(weightInput.value) : null;
+            const waist = waistInput.value ? parseFloat(waistInput.value) : null;
+            if (!weight) {
+                app.showAlert('Ingresá un peso válido', 'error');
+                return;
+            }
+            app.addBodyweightEntry(weight, waist);
+        };
+
+        function classifyWeightTrend(pct) {
+            if (pct == null) return null;
+            if (pct >= 0 && pct <= 0.25) return { color: '#4ADE80', label: '✓ Ritmo de ganancia controlada (objetivo 0 a +0.25%/sem)' };
+            if (pct > 0.25 && pct <= 0.5) return { color: '#fbbf24', label: '⚠️ Subiendo más rápido que el objetivo de recomposición' };
+            if (pct > 0.5) return { color: '#ff6b6b', label: '🔴 Subida muy rápida, revisá el superávit calórico' };
+            if (pct < 0 && pct >= -0.5) return { color: '#22d3ee', label: 'ℹ️ En baja (dentro del máximo de -0.5%/sem si buscás una fase de pérdida)' };
+            return { color: '#ff6b6b', label: '🔴 Bajando muy rápido para sostener masa muscular' };
+        }
+
+        function buildBodyweightChartSvg(entries, movingAvg) {
+            if (entries.length < 2) return '';
+            const width = 300, height = 90, pad = 6;
+            const weights = entries.map(e => e.weight);
+            const avgValues = movingAvg.map(e => e.avg);
+            const allValues = weights.concat(avgValues);
+            const min = Math.min(...allValues);
+            const max = Math.max(...allValues);
+            const range = (max - min) || 1;
+            const n = entries.length;
+            const xStep = n > 1 ? (width - pad * 2) / (n - 1) : 0;
+            const scaleY = (v) => height - pad - ((v - min) / range) * (height - pad * 2);
+
+            const rawPoints = entries.map((e, i) => `${(pad + i * xStep).toFixed(1)},${scaleY(e.weight).toFixed(1)}`).join(' ');
+            const avgPoints = movingAvg.length === entries.length
+                ? movingAvg.map((e, i) => `${(pad + i * xStep).toFixed(1)},${scaleY(e.avg).toFixed(1)}`).join(' ')
+                : '';
+
+            return `
+                <svg viewBox="0 0 ${width} ${height}" style="width:100%; height:90px; display:block;" preserveAspectRatio="none">
+                    <polyline points="${rawPoints}" fill="none" stroke="#333" stroke-width="1.5" />
+                    ${avgPoints ? `<polyline points="${avgPoints}" fill="none" stroke="#007AFF" stroke-width="2" />` : ''}
+                </svg>
+                <div style="font-size: 10px; color: #666; margin-top: 4px;">Gris: peso diario · Azul: media móvil 7 días</div>
+            `;
+        }
+
         window.exportData = function() {
             const data = {
                 exercises: app.exercises,
                 history: app.history,
+                bodyweightLog: app.bodyweightLog,
                 exported: new Date().toISOString()
             };
             const json = JSON.stringify(data, null, 2);
@@ -2210,13 +2410,14 @@
                     const parsed = JSON.parse(e.target.result);
                     const incomingExercises = Array.isArray(parsed.exercises) ? parsed.exercises : [];
                     const incomingHistory = Array.isArray(parsed.history) ? parsed.history : [];
+                    const incomingBodyweight = Array.isArray(parsed.bodyweightLog) ? parsed.bodyweightLog : [];
 
-                    if (!incomingExercises.length && !incomingHistory.length) {
+                    if (!incomingExercises.length && !incomingHistory.length && !incomingBodyweight.length) {
                         app.showAlert('El archivo no tiene datos reconocibles', 'error');
                         return;
                     }
 
-                    const hasExistingData = app.exercises.length > 0 || app.history.length > 0;
+                    const hasExistingData = app.exercises.length > 0 || app.history.length > 0 || app.bodyweightLog.length > 0;
                     const doMerge = hasExistingData
                         ? confirm('Ya hay datos en esta app.\n\nAceptar = FUSIONAR (agrega lo del archivo sin borrar lo actual, evitando duplicados por fecha+día).\nCancelar = REEMPLAZAR TODO por el contenido del archivo.')
                         : true;
@@ -2238,11 +2439,19 @@
                             }
                         }
                         app.history.sort((a, b) => a.date.localeCompare(b.date));
+                        // Fusionar peso corporal (por fecha, el archivo importado pisa el valor local si coinciden)
+                        for (const entry of incomingBodyweight) {
+                            const idx = app.bodyweightLog.findIndex(e => e.date === entry.date);
+                            if (idx >= 0) app.bodyweightLog[idx] = entry;
+                            else app.bodyweightLog.push(entry);
+                        }
+                        app.bodyweightLog.sort((a, b) => a.date.localeCompare(b.date));
                         app.saveToStorage();
                         app.showAlert(`Importado: ${added} sesión(es) nueva(s) agregadas`, 'success');
                     } else {
                         app.exercises = incomingExercises;
                         app.history = incomingHistory;
+                        app.bodyweightLog = incomingBodyweight;
                         app.currentRoutine = parsed.currentRoutine || app.currentRoutine || null;
                         app.saveToStorage();
                         app.showAlert('Datos reemplazados desde el archivo', 'success');
@@ -2356,6 +2565,7 @@
                 app.exercises = [];
                 app.history = [];
                 app.currentRoutine = null;
+                app.bodyweightLog = [];
                 app.saveToStorage();
                 localStorage.removeItem('gym-tracker-last-export');
                 localStorage.removeItem('gym-tracker-backup-snooze-until');
