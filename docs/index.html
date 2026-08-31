@@ -800,6 +800,11 @@
             });
         }
 
+        function escapeHtml(str) {
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+            return String(str == null ? '' : str).replace(/[&<>"']/g, c => map[c]);
+        }
+
         const app = {
             exercises: [],
             history: [],
@@ -1048,9 +1053,10 @@
 
             let html = '';
             let flatIndex = 0;
+            app._suggestionMatches = {};
 
             for (const day of days) {
-                html += `<div class="day-group-header">${day.label} · ${day.exercises.length} ejercicios</div>`;
+                html += `<div class="day-group-header">${escapeHtml(day.label)} · ${day.exercises.length} ejercicios</div>`;
 
                 for (const ex of day.exercises) {
                     const i = flatIndex;
@@ -1066,26 +1072,27 @@
                             </div>
                             <div class="edit-field">
                                 <label class="edit-label">Nombre del ejercicio</label>
-                                <input type="text" class="edit-input exercise-name-input" 
-                                       data-index="${i}" value="${ex.name}" 
+                                <input type="text" class="edit-input exercise-name-input"
+                                       data-index="${i}" value="${escapeHtml(ex.name)}"
                                        onkeyup="updateSuggestions(this)">
                             </div>
                     `;
 
                     if (similarMatches.length > 0) {
+                        app._suggestionMatches[i] = similarMatches;
                         html += `
                             <div class="edit-field">
                                 <label class="edit-label">¿Es el mismo que? (toca para usar)</label>
                                 <div class="suggestion-list">
                         `;
-                        for (const match of similarMatches) {
+                        similarMatches.forEach((match, matchIdx) => {
                             html += `
-                                <div class="suggestion-item" 
-                                     onclick="useExistingExercise(${i}, '${match.replace(/'/g, "\\'")}')">
-                                    ${match}
+                                <div class="suggestion-item"
+                                     onclick="useExistingExercise(${i}, ${matchIdx})">
+                                    ${escapeHtml(match)}
                                 </div>
                             `;
-                        }
+                        });
                         html += `
                                 </div>
                             </div>
@@ -1144,7 +1151,10 @@
             return maxLen > 0 ? matches / maxLen : 0;
         };
 
-        window.useExistingExercise = function(index, previousName) {
+        window.useExistingExercise = function(index, matchIndex) {
+            const matches = app._suggestionMatches && app._suggestionMatches[index];
+            const previousName = matches && matches[matchIndex];
+            if (previousName == null) return;
             const input = document.querySelector(`input[data-index="${index}"]`);
             input.value = previousName;
             input.focus();
@@ -1638,12 +1648,13 @@
                 daySelectorHtml = '<select class="day-select" onchange="selectDay(this.value)">';
                 for (const day of days) {
                     const selected = day === this.selectedDay ? 'selected' : '';
-                    daySelectorHtml += `<option value="${day}" ${selected}>${day}</option>`;
+                    daySelectorHtml += `<option value="${escapeHtml(day)}" ${selected}>${escapeHtml(day)}</option>`;
                 }
                 daySelectorHtml += '</select>';
             }
 
             const exercisesForDay = this.selectedDay ? this.getExercisesForDay(this.selectedDay) : this.exercises;
+            this._trackExercises = exercisesForDay;
 
             if (!this.trackSetsCount) this.trackSetsCount = {};
             for (const ex of exercisesForDay) {
@@ -1651,11 +1662,12 @@
             }
 
             let html = `
-                <div class="alert">Sesión de ${new Date().toLocaleDateString('es-AR')}${this.selectedDay ? ' · ' + this.selectedDay : ''}</div>
+                <div class="alert">Sesión de ${new Date().toLocaleDateString('es-AR')}${this.selectedDay ? ' · ' + escapeHtml(this.selectedDay) : ''}</div>
                 ${daySelectorHtml}
                 <form onsubmit="handleSubmitSesión(event)">
             `;
 
+            let exIdx = 0;
             for (const ex of exercisesForDay) {
                 const lastRecord = this.getLastRecord(ex.name);
                 const target = this.suggestNextTarget(ex.name);
@@ -1673,7 +1685,7 @@
                     <div class="exercise-card">
                         <div class="exercise-header">
                             <div>
-                                <div class="exercise-name">${ex.name}${badge}${bwBadge}</div>
+                                <div class="exercise-name">${escapeHtml(ex.name)}${badge}${bwBadge}</div>
                                 <div class="exercise-meta">${status} · objetivo ${range.repMin}-${range.repMax} ${unitLabel} · ${range.sets} series</div>
                             </div>
                         </div>
@@ -1686,27 +1698,28 @@
                     html += `
                         <div class="weight-input-group">
                             <span class="set-number">S${s + 1}</span>
-                            <input type="number" step="0.5" min="0" max="999" 
-                                   data-exercise="${ex.name}" data-field="weight" data-set="${s}" placeholder="${target.weight} ${weightLabel}">
+                            <input type="number" step="0.5" min="0" max="999"
+                                   data-exercise="${escapeHtml(ex.name)}" data-field="weight" data-set="${s}" placeholder="${target.weight} ${weightLabel}">
                             <span class="unit">${weightLabel}</span>
-                            <input type="number" step="1" min="0" max="999" 
-                                   data-exercise="${ex.name}" data-field="reps" data-set="${s}" placeholder="${target.reps} ${unitLabel}" style="width: 70px;">
+                            <input type="number" step="1" min="0" max="999"
+                                   data-exercise="${escapeHtml(ex.name)}" data-field="reps" data-set="${s}" placeholder="${target.reps} ${unitLabel}" style="width: 70px;">
                             <span class="unit">${unitLabel}</span>
-                            <input type="number" step="1" min="0" max="5" 
-                                   data-exercise="${ex.name}" data-field="rir" data-set="${s}" placeholder="RIR" style="width: 55px;">
+                            <input type="number" step="1" min="0" max="5"
+                                   data-exercise="${escapeHtml(ex.name)}" data-field="rir" data-set="${s}" placeholder="RIR" style="width: 55px;">
                             <span class="unit">RIR</span>
-                            ${s === 0 ? `<button type="button" class="use-suggested-btn" onclick="useSuggested('${ex.name.replace(/'/g, "\\'")}', ${target.weight}, ${target.reps})">Usar sugerido</button>` : ''}
+                            ${s === 0 ? `<button type="button" class="use-suggested-btn" onclick="useSuggested(${exIdx}, ${target.weight}, ${target.reps})">Usar sugerido</button>` : ''}
                         </div>
                     `;
                 }
 
                 html += `
                         <div class="set-controls">
-                            <button type="button" class="secondary" onclick="addSetRow('${ex.name.replace(/'/g, "\\'")}')">+ agregar serie</button>
-                            ${setsCount > 1 ? `<button type="button" class="secondary" onclick="removeSetRow('${ex.name.replace(/'/g, "\\'")}')">- quitar serie</button>` : ''}
+                            <button type="button" class="secondary" onclick="addSetRow(${exIdx})">+ agregar serie</button>
+                            ${setsCount > 1 ? `<button type="button" class="secondary" onclick="removeSetRow(${exIdx})">- quitar serie</button>` : ''}
                         </div>
                     </div>
                 `;
+                exIdx++;
             }
 
             html += `
@@ -1769,9 +1782,11 @@
             app.refreshTrack();
         };
 
-        window.useSuggested = function(exerciseName, weight, reps) {
-            document.querySelectorAll(`input[data-exercise="${CSS.escape(exerciseName)}"][data-field="weight"]`).forEach(inp => inp.value = weight);
-            document.querySelectorAll(`input[data-exercise="${CSS.escape(exerciseName)}"][data-field="reps"]`).forEach(inp => inp.value = reps);
+        window.useSuggested = function(exIdx, weight, reps) {
+            const ex = app._trackExercises && app._trackExercises[exIdx];
+            if (!ex) return;
+            document.querySelectorAll(`input[data-exercise="${CSS.escape(ex.name)}"][data-field="weight"]`).forEach(inp => inp.value = weight);
+            document.querySelectorAll(`input[data-exercise="${CSS.escape(ex.name)}"][data-field="reps"]`).forEach(inp => inp.value = reps);
         };
 
         window.setupSetPropagation = function() {
@@ -1823,18 +1838,22 @@
             if (notesEl && snapshot.notes) notesEl.value = snapshot.notes;
         };
 
-        window.addSetRow = function(exerciseName) {
+        window.addSetRow = function(exIdx) {
+            const ex = app._trackExercises && app._trackExercises[exIdx];
+            if (!ex) return;
             const snapshot = snapshotFormValues();
-            app.trackSetsCount[exerciseName] = (app.trackSetsCount[exerciseName] || 3) + 1;
+            app.trackSetsCount[ex.name] = (app.trackSetsCount[ex.name] || 3) + 1;
             app.refreshTrack();
             restoreFormValues(snapshot);
         };
 
-        window.removeSetRow = function(exerciseName) {
+        window.removeSetRow = function(exIdx) {
+            const ex = app._trackExercises && app._trackExercises[exIdx];
+            if (!ex) return;
             const snapshot = snapshotFormValues();
-            const current = app.trackSetsCount[exerciseName] || 3;
+            const current = app.trackSetsCount[ex.name] || 3;
             if (current <= 1) return;
-            app.trackSetsCount[exerciseName] = current - 1;
+            app.trackSetsCount[ex.name] = current - 1;
             app.refreshTrack();
             restoreFormValues(snapshot);
         };
@@ -1928,7 +1947,7 @@
                     .filter(([, sets]) => Array.isArray(sets) && sets.length)
                     .map(([name, sets]) => {
                         const setsText = sets.map(s => `${s.weight}×${s.reps}`).join(', ');
-                        return `${name}: ${setsText}`;
+                        return `${escapeHtml(name)}: ${setsText}`;
                     })
                     .join(' · ');
 
@@ -1946,10 +1965,10 @@
 
                 html += `
                     <div class="history-item">
-                        <div class="history-date">${date}${sesion.day ? ' · ' + sesion.day : ''}</div>
+                        <div class="history-date">${date}${sesion.day ? ' · ' + escapeHtml(sesion.day) : ''}</div>
                         <div class="history-detail">${rows || 'Sin ejercicios registrados'}</div>
                         ${cardioText}
-                        ${sesion.notes ? `<div class="history-detail" style="margin-top: 4px; color: #888;">📝 ${sesion.notes}</div>` : ''}
+                        ${sesion.notes ? `<div class="history-detail" style="margin-top: 4px; color: #888;">📝 ${escapeHtml(sesion.notes)}</div>` : ''}
                     </div>
                 `;
             }
@@ -1987,7 +2006,7 @@
 
                 html += `
                     <div class="stat-card">
-                        <div class="stat-label">${ex.name.substring(0, 18)}</div>
+                        <div class="stat-label">${escapeHtml(ex.name.substring(0, 18))}</div>
                         <div class="stat-value">${valueText}</div>
                         <div style="margin-top: 4px;">${progress}</div>
                     </div>
