@@ -323,3 +323,248 @@ test('removeExerciseFromRoutine no hace nada si el usuario cancela la confirmaci
 
     assert.equal(app.exercises.length, 1);
 });
+
+test('sessionSortKey usa hora_inicio real, o el mediodía de la fecha como fallback', () => {
+    const { sessionSortKey } = loadApp();
+    assert.equal(sessionSortKey({ date: '2026-08-01', hora_inicio: '2026-08-01T07:30:00.000Z' }), '2026-08-01T07:30:00.000Z');
+    assert.equal(sessionSortKey({ date: '2026-08-01' }), '2026-08-01T12:00:00.000Z');
+});
+
+test('runMigrations agrega hora_inicio estimada a sesiones viejas sin tocar las que ya la tienen', () => {
+    const { app } = loadApp();
+    app.history = [
+        { date: '2026-07-01', day: 'Push', records: {} },
+        { date: '2026-07-08', hora_inicio: '2026-07-08T09:00:00.000Z', hora_estimada: false, day: 'Push', records: {} }
+    ];
+
+    app.runMigrations();
+
+    assert.equal(app.history[0].hora_inicio, '2026-07-01T12:00:00.000Z');
+    assert.equal(app.history[0].hora_estimada, true);
+    // La sesión que ya tenía hora real no se toca.
+    assert.equal(app.history[1].hora_inicio, '2026-07-08T09:00:00.000Z');
+    assert.equal(app.history[1].hora_estimada, false);
+});
+
+test('getExerciseSessionPoints combina en un punto ambiguo dos sesiones estimadas del mismo día', () => {
+    const { app } = loadApp();
+    app.history = [
+        { date: '2026-08-01', hora_inicio: '2026-08-01T12:00:00.000Z', hora_estimada: true, day: 'Push', records: { 'Dominadas': [{ weight: 0, reps: 6, rir: 2 }] } },
+        { date: '2026-08-01', hora_inicio: '2026-08-01T12:00:00.000Z', hora_estimada: true, day: 'Push', records: { 'Dominadas': [{ weight: 0, reps: 9, rir: 1 }] } },
+        { date: '2026-08-08', hora_inicio: '2026-08-08T12:00:00.000Z', hora_estimada: true, day: 'Push', records: { 'Dominadas': [{ weight: 0, reps: 8, rir: 2 }] } }
+    ];
+
+    const points = app.getExerciseSessionPoints('Dominadas');
+
+    assert.equal(points.length, 2, 'las 2 sesiones ambiguas del 1/8 deberían colapsar en un solo punto');
+    assert.equal(points[0].date, '2026-08-01');
+    assert.equal(points[0].ambiguous, true);
+    assert.equal(points[1].date, '2026-08-08');
+    assert.equal(points[1].ambiguous, false);
+});
+
+test('getExerciseSessionPoints NO combina dos sesiones del mismo día si ambas tienen hora real', () => {
+    const { app } = loadApp();
+    app.history = [
+        { date: '2026-08-01', hora_inicio: '2026-08-01T08:00:00.000Z', hora_estimada: false, day: 'Push', records: { 'Press banca': [{ weight: 40, reps: 8, rir: 2 }] } },
+        { date: '2026-08-01', hora_inicio: '2026-08-01T19:00:00.000Z', hora_estimada: false, day: 'Push', records: { 'Press banca': [{ weight: 42.5, reps: 6, rir: 1 }] } }
+    ];
+
+    const points = app.getExerciseSessionPoints('Press banca');
+
+    assert.equal(points.length, 2, 'con hora real conocida, dos sesiones el mismo día son puntos distintos');
+    assert.equal(points.every(p => !p.ambiguous), true);
+});
+
+test('importData ya NO descarta una segunda sesión real del mismo día (bug de fusión por fecha)', () => {
+    const morningSesion = { date: '2026-09-01', hora_inicio: '2026-09-01T08:00:00.000Z', hora_estimada: false, day: 'Push', records: { 'Press banca': [{ weight: 40, reps: 8, rir: 2 }] } };
+    const eveningSesion = { date: '2026-09-01', hora_inicio: '2026-09-01T19:00:00.000Z', hora_estimada: false, day: 'Push', records: { 'Sentadilla': [{ weight: 80, reps: 5, rir: 1 }] } };
+
+    const { app, importData } = loadAppWithBackupIO([true], JSON.stringify({ exercises: [], history: [eveningSesion] }));
+    app.exercises = [];
+    app.history = [morningSesion];
+
+    importData({ target: { files: [{}], value: '' } });
+
+    assert.equal(app.history.length, 2, 'las dos sesiones reales del mismo día deben conservarse por separado');
+});
+
+test('importData sigue deduplicando si se re-importa exactamente el mismo backup', () => {
+    const sesion = { date: '2026-09-01', hora_inicio: '2026-09-01T08:00:00.000Z', hora_estimada: false, day: 'Push', records: { 'Press banca': [{ weight: 40, reps: 8, rir: 2 }] } };
+
+    const { app, importData } = loadAppWithBackupIO([true], JSON.stringify({ exercises: [], history: [sesion] }));
+    app.exercises = [];
+    app.history = [sesion];
+
+    importData({ target: { files: [{}], value: '' } });
+
+    assert.equal(app.history.length, 1, 'reimportar la sesión idéntica no debería duplicarla');
+});
+
+test('topSetOf desempata por reps cuando el peso es igual (ej. 0kg en peso corporal)', () => {
+    const { app } = loadApp();
+    const best = app.topSetOf([{ weight: 0, reps: 6, rir: 2 }, { weight: 0, reps: 9, rir: 1 }, { weight: 0, reps: 4, rir: 3 }]);
+    assert.equal(best.reps, 9, 'con todo el peso empatado en 0, la mejor marca es la de más reps');
+
+    // Sigue priorizando peso por sobre reps cuando el peso SÍ difiere (comportamiento previo intacto).
+    const bestWeighted = app.topSetOf([{ weight: 40, reps: 10 }, { weight: 42.5, reps: 6 }]);
+    assert.equal(bestWeighted.weight, 42.5);
+});
+
+test('estimateEffectiveOneRM da 0 solo por falta de datos, nunca por peso_kg=0 en un ejercicio a peso corporal', () => {
+    const { app, estimateEffectiveOneRM } = loadApp();
+    app.bodyweightLog = [{ date: '2026-07-01', weight: 80 }];
+    const dominadas = { name: 'Dominadas', bodyweight: true };
+
+    const sinLastre = estimateEffectiveOneRM(dominadas, { weight: 0, reps: 8 });
+    assert.ok(sinLastre > 0, 'peso_kg=0 en un ejercicio a peso corporal no debería dar e1RM=0');
+
+    const masReps = estimateEffectiveOneRM(dominadas, { weight: 0, reps: 10 });
+    assert.ok(masReps > sinLastre, 'más reps al mismo peso corporal debería reflejar más progreso');
+
+    const conLastre = estimateEffectiveOneRM(dominadas, { weight: 5, reps: 8 });
+    assert.ok(conLastre > sinLastre, 'agregar lastre a las mismas reps debería subir el e1RM efectivo');
+
+    // Un ejercicio NO marcado como bodyweight sigue usando el peso tal cual (sin sumar peso corporal).
+    const banca = { name: 'Press banca', bodyweight: false };
+    assert.equal(estimateEffectiveOneRM(banca, { weight: 0, reps: 8 }), 0);
+});
+
+test('getExerciseE1RMSeries no descarta las series sin lastre de un ejercicio a peso corporal', () => {
+    const { app } = loadApp();
+    app.exercises = [{ name: 'Dominadas', bodyweight: true }];
+    app.bodyweightLog = [{ date: '2026-07-01', weight: 80 }];
+    app.history = [
+        { date: '2026-07-05', hora_inicio: '2026-07-05T08:00:00.000Z', hora_estimada: false, records: { 'Dominadas': [{ weight: 0, reps: 6, rir: 2 }] } },
+        { date: '2026-07-12', hora_inicio: '2026-07-12T08:00:00.000Z', hora_estimada: false, records: { 'Dominadas': [{ weight: 5, reps: 6, rir: 2 }] } }
+    ];
+
+    const series = app.getExerciseE1RMSeries('Dominadas');
+
+    assert.equal(series.length, 2, 'la serie sin lastre no debería desaparecer de la curva');
+    assert.ok(series.every(p => p.e1rm > 0));
+    assert.ok(series[1].e1rm > series[0].e1rm, 'agregar lastre debería seguir subiendo la misma curva, no una serie nueva');
+});
+
+test('classifyExercise reconoce sentadilla pistol y curl nórdico como peso corporal', () => {
+    const { classifyExercise } = loadApp();
+    assert.equal(classifyExercise('Sentadilla pistol').bodyweight, true);
+    assert.equal(classifyExercise('Curl nórdico').bodyweight, true);
+    assert.equal(classifyExercise('Curl nordico').bodyweight, true, 'debería tolerar la falta de tilde');
+    assert.equal(classifyExercise('Dominadas supinadas').bodyweight, true);
+    assert.equal(classifyExercise('Fondos en paralelas').bodyweight, true);
+    assert.equal(classifyExercise('Chin-up').bodyweight, true);
+    assert.equal(classifyExercise('Push-up').bodyweight, true);
+    assert.equal(classifyExercise('Press banca').bodyweight, false);
+});
+
+test('runMigrations corrige el catálogo existente de false a true, nunca al revés', () => {
+    const { app } = loadApp();
+    app.exercises = [
+        { name: 'Sentadilla pistol', bodyweight: false },
+        { name: 'Curl nórdico', bodyweight: false },
+        { name: 'Press banca', bodyweight: false },
+        { name: 'Curl con mancuerna', bodyweight: true } // explícitamente marcado por el usuario, no debe tocarse
+    ];
+    app.history = [];
+
+    app.runMigrations();
+
+    assert.equal(app.exercises[0].bodyweight, true);
+    assert.equal(app.exercises[1].bodyweight, true);
+    assert.equal(app.exercises[2].bodyweight, false, 'Press banca no matchea el patrón, se deja como está');
+    assert.equal(app.exercises[3].bodyweight, true, 'un true existente nunca se pisa');
+});
+
+test('addExerciseToToday avisa (sin bloquear) si el ejercicio ya está en otro día', () => {
+    const fields = {
+        newExerciseName: 'Plancha', newExerciseSets: '3', newExerciseRepMin: '30', newExerciseRepMax: '60',
+        newExerciseBodyweight: false, newExerciseTimeBased: false
+    };
+    let alertMsg = null;
+    const { app, addExerciseToToday } = loadApp({
+        sandbox: {
+            document: (() => {
+                const doc = makeFieldStubDocument(fields);
+                const realGetAlert = doc.getElementById;
+                doc.getElementById = (id) => {
+                    const el = realGetAlert(id);
+                    if (id === 'globalStatus') {
+                        Object.defineProperty(el, 'innerHTML', { set: (v) => { alertMsg = v; }, get: () => alertMsg || '' });
+                    }
+                    return el;
+                };
+                return doc;
+            })()
+        }
+    });
+    app.exercises = [{ name: 'Plancha', day: 'Push', sets: 3, repMin: 30, repMax: 60, unit: 'seg', bodyweight: true }];
+    app.selectedDay = 'Core';
+
+    addExerciseToToday();
+
+    assert.equal(app.exercises.length, 2, 'el ejercicio se agrega igual, el aviso no bloquea');
+    assert.ok(alertMsg.includes('Push'), `esperaba mención de "Push" en: ${alertMsg}`);
+});
+
+test('saveExerciseEdits avisa si renombrar el ejercicio lo hace coincidir con uno de otro día', () => {
+    const fields = {
+        'exercise-editor-name-0': 'Dominadas', 'exercise-editor-sets-0': '3',
+        'exercise-editor-repmin-0': '6', 'exercise-editor-repmax-0': '10',
+        'exercise-editor-bw-0': false, 'exercise-editor-time-0': false
+    };
+    let alertMsg = null;
+    const { app, saveExerciseEdits } = loadApp({
+        sandbox: {
+            document: (() => {
+                const doc = makeFieldStubDocument(fields);
+                const realGetAlert = doc.getElementById;
+                doc.getElementById = (id) => {
+                    const el = realGetAlert(id);
+                    if (id === 'globalStatus') {
+                        Object.defineProperty(el, 'innerHTML', { set: (v) => { alertMsg = v; }, get: () => alertMsg || '' });
+                    }
+                    return el;
+                };
+                return doc;
+            })()
+        }
+    });
+    const original = { name: 'Press banca', day: 'Push', sets: 3, repMin: 8, repMax: 12, unit: 'reps', bodyweight: false };
+    app.exercises = [original, { name: 'Dominadas', day: 'Pull', sets: 3, repMin: 6, repMax: 10, unit: 'reps', bodyweight: true }];
+    app._trackExercises = [original];
+
+    saveExerciseEdits(0);
+
+    assert.ok(alertMsg.includes('Pull'), `esperaba mención de "Pull" en: ${alertMsg}`);
+});
+
+test('exportCSV escribe BOM + UTF-8 (tildes/ñ se leen bien; sacar el BOM reintroduce el mojibake "SesiÃ³n")', () => {
+    let capturedParts = null;
+    const { app, exportCSV } = loadApp({
+        sandbox: {
+            URL: { createObjectURL: () => 'blob:fake', revokeObjectURL: () => {} },
+            Blob: function Blob(parts) { capturedParts = parts; }
+        }
+    });
+    app.exercises = [{ name: 'Sesión de tracción', day: 'Pull', sets: 1, repMin: 8, repMax: 12, unit: 'reps', bodyweight: false }];
+    app.history = [{
+        date: '2026-09-01', hora_inicio: '2026-09-01T08:00:00.000Z', hora_estimada: false, day: 'Pull',
+        notes: 'Día áspero, mañana ñoño',
+        records: { 'Sesión de tracción': [{ weight: 40, reps: 8, rir: 2 }] }
+    }];
+
+    exportCSV();
+
+    const csv = capturedParts.join('');
+    assert.ok(csv.startsWith('﻿'), 'el contenido del Blob debe empezar con el BOM');
+    assert.ok(csv.includes('Sesión de tracción') && csv.includes('áspero') && csv.includes('ñoño'));
+
+    // Reproduce el bug real: los mismos bytes, leídos SIN respetar el BOM
+    // (como Latin-1/CP1252), dan el mojibake que apareció en el export
+    // analizado. Sirve como evidencia de que sacar el BOM sería un downgrade.
+    const bytesWithBom = Buffer.from(csv, 'utf8');
+    const bytesWithoutBom = bytesWithBom.subarray(3); // 3 bytes del BOM en UTF-8
+    const misreadAsLatin1 = bytesWithoutBom.toString('latin1');
+    assert.ok(misreadAsLatin1.includes('SesiÃ³n de tracciÃ³n'), 'confirma el mecanismo del mojibake reportado');
+});

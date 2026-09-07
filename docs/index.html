@@ -1030,6 +1030,13 @@
             return String(str == null ? '' : str).replace(/[&<>"']/g, c => map[c]);
         }
 
+        // Clave de orden cronológico de una sesión. Las sesiones nuevas siempre
+        // tienen hora_inicio real; las migradas desde antes de que existiera ese
+        // campo caen al mediodía de su fecha (hora_estimada=true en la sesión).
+        function sessionSortKey(sesion) {
+            return sesion.hora_inicio || (sesion.date + 'T12:00:00.000Z');
+        }
+
         // Se incrementa cuando cambia la forma del JSON exportado (export/import),
         // para poder detectar backups de una versión futura de la app.
         const BACKUP_SCHEMA_VERSION = 1;
@@ -1187,6 +1194,45 @@
                 } catch (e) {
                     console.error('Error loading data:', e);
                 }
+                this.runMigrations();
+            },
+
+            // Migraciones idempotentes sobre datos ya guardados en localStorage.
+            // Nunca borran ni inventan datos reales; solo completan campos que
+            // no existían en versiones previas de la app. Se corren en cada
+            // carga (son baratas) y solo persisten si de verdad cambió algo.
+            runMigrations() {
+                let changed = false;
+
+                for (const sesion of this.history) {
+                    if (!sesion.hora_inicio) {
+                        sesion.hora_inicio = sesion.date + 'T12:00:00.000Z';
+                        sesion.hora_estimada = true;
+                        changed = true;
+                    }
+                }
+
+                // Catálogo: ejercicios que son a peso corporal por definición
+                // (dominadas, fondos, sentadilla pistol, curl nórdico...) pero
+                // quedaron marcados bodyweight=false, por ejemplo por venir de
+                // un PDF con un nombre que el clasificador de esa época no
+                // reconocía. Solo corrige false->true, nunca al revés, para no
+                // pisar una elección explícita del usuario.
+                let bodyweightFixed = 0;
+                for (const ex of this.exercises) {
+                    if (!ex.bodyweight && classifyExercise(ex.name || '').bodyweight) {
+                        ex.bodyweight = true;
+                        bodyweightFixed++;
+                    }
+                }
+                if (bodyweightFixed > 0) {
+                    changed = true;
+                    this.showAlert(`✓ Se corrigieron ${bodyweightFixed} ejercicio(s) marcados como peso corporal`, 'success');
+                }
+
+                if (changed) {
+                    this.saveToStorage();
+                }
             },
 
             saveToStorage() {
@@ -1211,31 +1257,82 @@
             },
 
             getLastRecord(exerciseName) {
-                for (let i = this.history.length - 1; i >= 0; i--) {
-                    const sets = this.history[i].records && this.history[i].records[exerciseName];
-                    const topSet = this.topSetOf(sets);
-                    if (topSet) return topSet;
-                }
-                return null;
+                const points = this.getExerciseSessionPoints(exerciseName);
+                return points.length ? points[points.length - 1].top : null;
             },
 
             topSetOf(sets) {
                 if (!Array.isArray(sets) || !sets.length) return null;
-                let best = sets[0];
+                let best = null;
                 for (const s of sets) {
-                    if (s && s.weight != null && (best.weight == null || s.weight > best.weight)) best = s;
+                    if (!s || s.weight == null) continue;
+                    if (!best) { best = s; continue; }
+                    // A igual peso (incluido 0kg extra en ejercicios a peso
+                    // corporal, donde todas las series empatan en 0), la mejor
+                    // marca es la de más reps, no la primera que aparece.
+                    if (s.weight > best.weight || (s.weight === best.weight && (s.reps || 0) > (best.reps || 0))) {
+                        best = s;
+                    }
                 }
-                return best && best.weight != null ? best : null;
+                return best;
             },
 
             getLastNRecords(exerciseName, n) {
-                const found = [];
-                for (let i = this.history.length - 1; i >= 0 && found.length < n; i--) {
-                    const sets = this.history[i].records && this.history[i].records[exerciseName];
-                    const topSet = this.topSetOf(sets);
-                    if (topSet) found.push(topSet);
+                const points = this.getExerciseSessionPoints(exerciseName);
+                return points.slice(-n).map(p => p.top);
+            },
+
+            // Un punto de progresión por fecha para exerciseName, en orden
+            // cronológico (por hora_inicio, con fallback a las 12:00 de `date`
+            // para sesiones migradas). Si dos o más sesiones comparten la misma
+            // fecha y alguna de ellas tiene hora_estimada, no sabemos el orden
+            // real entre ellas: se combinan en un solo punto ambiguo en vez de
+            // tratarlas como progresión ordenada punto-a-punto (ver item 1).
+            getExerciseSessionPoints(exerciseName) {
+                const sorted = [...this.history].sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)));
+
+                const groups = [];
+                let currentGroup = null;
+                for (const sesion of sorted) {
+                    if (currentGroup && currentGroup.date === sesion.date) {
+                        currentGroup.sessions.push(sesion);
+                    } else {
+                        currentGroup = { date: sesion.date, sessions: [sesion] };
+                        groups.push(currentGroup);
+                    }
                 }
-                return found.reverse();
+
+                const points = [];
+                for (const group of groups) {
+                    const anyEstimated = group.sessions.some(s => s.hora_estimada);
+                    if (group.sessions.length > 1 && anyEstimated) {
+                        const allSets = [];
+                        for (const s of group.sessions) {
+                            const sets = s.records && s.records[exerciseName];
+                            if (Array.isArray(sets)) allSets.push(...sets);
+                        }
+                        const top = this.topSetOf(allSets);
+                        if (top) points.push({ date: group.date, top, ambiguous: true });
+                    } else {
+                        for (const s of group.sessions) {
+                            const sets = s.records && s.records[exerciseName];
+                            const top = this.topSetOf(sets);
+                            if (top) points.push({ date: group.date, top, ambiguous: false });
+                        }
+                    }
+                }
+                return points;
+            },
+
+            // Peso corporal de referencia para e1RM efectivo en ejercicios a
+            // peso corporal: el último registrado en la pestaña Peso, o un
+            // valor genérico si todavía no se cargó ninguno.
+            getReferenceBodyweight() {
+                if (this.bodyweightLog && this.bodyweightLog.length) {
+                    const sorted = [...this.bodyweightLog].sort((a, b) => a.date.localeCompare(b.date));
+                    return sorted[sorted.length - 1].weight;
+                }
+                return 70;
             },
 
             getLastWeight(exerciseName) {
@@ -1304,10 +1401,11 @@
             },
 
             checkStagnation(exerciseName) {
+                const ex = this.exercises.find(e => e.name === exerciseName);
                 const records = this.getLastNRecords(exerciseName, 3);
                 if (records.length < 3) return false;
 
-                const rms = records.map(r => estimateOneRM(r.weight || 0.1, r.reps));
+                const rms = records.map(r => estimateEffectiveOneRM(ex, r));
                 const noProgress = rms[1] <= rms[0] + 0.01 && rms[2] <= rms[1] + 0.01;
                 return noProgress;
             },
@@ -1326,10 +1424,13 @@
             },
 
             addSesión(records, notes = '', cardio = null, durationMin = null) {
-                const today = new Date().toISOString().split('T')[0];
+                const now = new Date();
+                const today = now.toISOString().split('T')[0];
                 const totalSets = Object.values(records).reduce((sum, sets) => sum + (Array.isArray(sets) ? sets.length : 0), 0);
                 const sesion = {
                     date: today,
+                    hora_inicio: now.toISOString(),
+                    hora_estimada: false,
                     day: this.selectedDay,
                     records: records,
                     notes: notes,
@@ -1642,7 +1743,8 @@
                         </div>
                         <div class="edit-field">
                             <label class="edit-label">Nombre</label>
-                            <input type="text" class="edit-input" data-manual-field="name" value="${escapeHtml(item.name || '')}">
+                            <input type="text" class="edit-input" data-manual-field="name" value="${escapeHtml(item.name || '')}"
+                                   oninput="autoSuggestBodyweight(this, this.closest('[data-manual-idx]').querySelector('[data-manual-field=&quot;bodyweight&quot;]'))">
                         </div>
                         <div class="edit-field">
                             <label class="edit-label">Día (ej: Push, Pull, Piernas)</label>
@@ -1664,7 +1766,7 @@
                         </div>
                         <div class="edit-field" style="display: flex; gap: 16px; align-items: center;">
                             <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
-                                <input type="checkbox" data-manual-field="bodyweight" ${item.bodyweight ? 'checked' : ''}> Peso corporal
+                                <input type="checkbox" data-manual-field="bodyweight" ${item.bodyweight ? 'checked' : ''} onchange="this.dataset.touched='true'"> Peso corporal
                             </label>
                             <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
                                 <input type="checkbox" data-manual-field="timeBased" ${item.unit === 'seg' ? 'checked' : ''}> Se mide en segundos
@@ -1745,6 +1847,19 @@
                 return;
             }
 
+            // Mismo nombre bajo 2+ días en el resultado final: puede ser un
+            // ejercicio que a propósito pertenece a varias plantillas, o un
+            // nombre repetido por accidente. No bloquea el guardado, solo avisa.
+            const daysByName = new Map();
+            for (const item of valid) {
+                if (!daysByName.has(item.name)) daysByName.set(item.name, new Set());
+                daysByName.get(item.name).add(item.day);
+            }
+            const conflicts = Array.from(daysByName.entries()).filter(([, days]) => days.size > 1);
+            const warning = conflicts.length
+                ? ` ⚠️ Ojo: ${conflicts.map(([name, days]) => `"${name}" está en ${Array.from(days).join(', ')}`).join('; ')}. Si no fue intencional, revisalo.`
+                : '';
+
             app.exercises = valid;
             app.currentRoutine = new Date().toISOString().split('T')[0];
             app.selectedDay = valid[0].day;
@@ -1752,15 +1867,35 @@
 
             document.getElementById('manualEditContainer').style.display = 'none';
             document.getElementById('uploadContainer').style.display = 'block';
-            app.showAlert(`✓ ${valid.length} ejercicios guardados`, 'success');
+            app.showAlert(`✓ ${valid.length} ejercicios guardados.${warning}`, 'success');
             switchTab('track');
         };
 
         window.estimateOneRM = function(weight, reps) {
-            if (!weight || !reps || reps <= 0) return 0;
+            if (weight == null || !reps || reps <= 0) return 0;
             if (reps === 1) return weight;
             return weight * (1 + reps / 30);
         };
+
+        // e1RM "efectivo" para poder comparar progreso en ejercicios a peso
+        // corporal (peso_kg=0 mientras no se agrega lastre) contra la misma
+        // curva una vez que sí se agrega lastre. Sin esto, estimateOneRM da 0
+        // para toda serie sin lastre y el ejercicio desaparece de la curva de
+        // progresión aunque las reps sí estén mejorando.
+        //
+        // Se usa peso_corporal_referencia + lastre como el "peso" de Epley.
+        // La referencia es el último peso corporal cargado (o 70kg si nunca
+        // se cargó ninguno): es una constante para TODO el historial del
+        // ejercicio, así que la curva queda continua y comparable en ambas
+        // fases (sin lastre y con lastre), en vez de saltar o reiniciarse.
+        function estimateEffectiveOneRM(exercise, set) {
+            if (!set || set.reps == null) return 0;
+            if (exercise && exercise.bodyweight) {
+                const bw = app.getReferenceBodyweight();
+                return estimateOneRM(bw + (set.weight || 0), set.reps);
+            }
+            return estimateOneRM(set.weight, set.reps);
+        }
 
         window.findExerciseByPattern = function(pattern) {
             const lower = pattern.toLowerCase();
@@ -2021,7 +2156,7 @@
 
         function classifyExercise(name) {
             const lower = name.toLowerCase();
-            const bodyweight = /domin|flexi|fondos|plancha/.test(lower);
+            const bodyweight = /domin|flexi|fondos|plancha|pistol|n[oó]rdic|muscle.?up|chin.?up|push.?up|\bdips?\b/.test(lower);
             const timeBased = /plancha|isometric/.test(lower);
             return { bodyweight, timeBased };
         }
@@ -2356,7 +2491,8 @@
                         <div class="exercise-editor" id="exercise-editor-${exIdx}" style="display: none;">
                             <div class="edit-field">
                                 <label class="edit-label">Nombre del ejercicio</label>
-                                <input type="text" class="edit-input" id="exercise-editor-name-${exIdx}" value="${escapeHtml(ex.name)}">
+                                <input type="text" class="edit-input" id="exercise-editor-name-${exIdx}" value="${escapeHtml(ex.name)}"
+                                       oninput="autoSuggestBodyweight(this, document.getElementById('exercise-editor-bw-${exIdx}'))">
                             </div>
                             <div class="edit-field" style="display: flex; gap: 8px;">
                                 <div style="flex: 1;">
@@ -2374,7 +2510,7 @@
                             </div>
                             <div class="edit-field" style="display: flex; gap: 16px; align-items: center;">
                                 <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
-                                    <input type="checkbox" id="exercise-editor-bw-${exIdx}" ${ex.bodyweight ? 'checked' : ''}> Peso corporal
+                                    <input type="checkbox" id="exercise-editor-bw-${exIdx}" ${ex.bodyweight ? 'checked' : ''} onchange="this.dataset.touched='true'"> Peso corporal
                                 </label>
                                 <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
                                     <input type="checkbox" id="exercise-editor-time-${exIdx}" ${ex.unit === 'seg' ? 'checked' : ''}> Se mide en segundos
@@ -2448,7 +2584,8 @@
                     <div id="addExerciseForm" style="display: ${addExerciseOpen ? 'block' : 'none'}; margin-top: 10px;">
                         <div class="edit-field">
                             <label class="edit-label">Nombre del ejercicio</label>
-                            <input type="text" class="edit-input" id="newExerciseName" placeholder="Ej: Remo en polea baja">
+                            <input type="text" class="edit-input" id="newExerciseName" placeholder="Ej: Remo en polea baja"
+                                   oninput="autoSuggestBodyweight(this, document.getElementById('newExerciseBodyweight'))">
                         </div>
                         <div class="edit-field" style="display: flex; gap: 8px;">
                             <div style="flex: 1;">
@@ -2466,7 +2603,7 @@
                         </div>
                         <div class="edit-field" style="display: flex; gap: 16px; align-items: center;">
                             <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
-                                <input type="checkbox" id="newExerciseBodyweight"> Peso corporal
+                                <input type="checkbox" id="newExerciseBodyweight" onchange="this.dataset.touched='true'"> Peso corporal
                             </label>
                             <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
                                 <input type="checkbox" id="newExerciseTimeBased"> Se mide en segundos
@@ -2587,6 +2724,7 @@
             const sets = Math.max(1, parseInt(setsVal, 10) || ex.sets || 3);
 
             const oldName = ex.name;
+            const warning = dayConflictSuffix(newName, ex.day);
             app.exercises[globalIdx] = {
                 ...ex,
                 name: newName,
@@ -2607,7 +2745,7 @@
             }
 
             app.saveToStorage();
-            app.showAlert('✓ Ejercicio actualizado', 'success');
+            app.showAlert(`✓ Ejercicio actualizado.${warning}`, 'success');
             app.refreshTrack();
         };
 
@@ -2627,12 +2765,38 @@
             app.refreshTrack();
         };
 
+        // Sugiere "peso corporal" según el nombre tipeado, sin pisar la
+        // elección del usuario si ya tocó el checkbox a mano (dataset.touched).
+        window.autoSuggestBodyweight = function(nameInput, checkbox) {
+            if (!checkbox || checkbox.dataset.touched === 'true') return;
+            checkbox.checked = classifyExercise(nameInput.value || '').bodyweight;
+        };
+
         window.toggleAddExerciseForm = function() {
             const snapshot = snapshotFormValues();
             app._addExerciseFormOpen = !app._addExerciseFormOpen;
             app.refreshTrack();
             restoreFormValues(snapshot);
         };
+
+        // Días (distintos de excludeDay) bajo los que ya existe un ejercicio con
+        // ese nombre en el catálogo. Sirve para avisar (sin bloquear el guardado)
+        // si el mismo ejercicio quedó repartido en más de una plantilla sin que
+        // haya sido una decisión explícita — típicamente un nombre repetido por
+        // accidente en vez de una reutilización intencional del movimiento.
+        function getOtherDaysForExercise(name, excludeDay) {
+            const days = new Set();
+            for (const ex of app.exercises) {
+                if (ex.name === name && ex.day && ex.day !== excludeDay) days.add(ex.day);
+            }
+            return Array.from(days);
+        }
+
+        function dayConflictSuffix(name, day) {
+            const otherDays = getOtherDaysForExercise(name, day);
+            if (!otherDays.length) return '';
+            return ` ⚠️ Ojo: "${name}" también está en ${otherDays.join(', ')}. Si no fue intencional, revisalo.`;
+        }
 
         window.addExerciseToToday = function() {
             const name = (document.getElementById('newExerciseName').value || '').trim();
@@ -2653,11 +2817,12 @@
             const sets = Math.max(1, parseInt(setsVal, 10) || 3);
             const day = app.selectedDay || 'General';
 
+            const warning = dayConflictSuffix(name, day);
             app.exercises.push({ name, day, sets, repMin, repMax, unit: timeBased ? 'seg' : 'reps', bodyweight });
 
             app._addExerciseFormOpen = false;
             app.saveToStorage();
-            app.showAlert(`✓ "${name}" agregado a ${day}`, 'success');
+            app.showAlert(`✓ "${name}" agregado a ${day}.${warning}`, 'success');
             app.refreshTrack();
         };
 
@@ -2765,7 +2930,12 @@
                         if (weightInput) weightInput.style.borderColor = 'var(--danger-text)';
                         errorState.hasError = true;
                     }
-                    if (weight !== null && reps !== null) {
+                    if (weight !== null && reps !== null && rir === null) {
+                        if (rirInput) rirInput.style.borderColor = 'var(--danger-text)';
+                        errorState.hasError = true;
+                        errorState.missingRir = true;
+                    }
+                    if (weight !== null && reps !== null && rir !== null) {
                         sets.push({ weight, reps, rir });
                     }
                 });
@@ -2774,7 +2944,12 @@
             }
 
             if (errorState.hasError) {
-                app.showAlert('Completa peso Y reps juntos en cada serie (o dejala vacía si no la hiciste)', 'error');
+                app.showAlert(
+                    errorState.missingRir
+                        ? 'Completa peso, reps Y RIR en cada serie (o dejala vacía si no la hiciste)'
+                        : 'Completa peso Y reps juntos en cada serie (o dejala vacía si no la hiciste)',
+                    'error'
+                );
                 return;
             }
 
@@ -2869,8 +3044,8 @@
 
                 let progress = '';
                 if (last && prev) {
-                    const rmLast = estimateOneRM(last.weight, last.reps);
-                    const rmPrev = estimateOneRM(prev.weight, prev.reps);
+                    const rmLast = estimateEffectiveOneRM(ex, last);
+                    const rmPrev = estimateEffectiveOneRM(ex, prev);
                     const diff = rmLast - rmPrev;
                     if (diff > 0.5) {
                         progress = `<span class="progress-badge progress-up">+${diff.toFixed(1)} 1RM</span>`;
@@ -2926,14 +3101,10 @@
         };
 
         app.getExerciseE1RMSeries = function(exerciseName, maxPoints = 20) {
-            const sorted = [...this.history].sort((a, b) => a.date.localeCompare(b.date));
-            const points = [];
-            for (const sesion of sorted) {
-                const sets = sesion.records && sesion.records[exerciseName];
-                const top = this.topSetOf(sets);
-                if (top) points.push({ date: sesion.date, e1rm: estimateOneRM(top.weight, top.reps) });
-            }
-            return points.slice(-maxPoints);
+            const ex = this.exercises.find(e => e.name === exerciseName);
+            const points = this.getExerciseSessionPoints(exerciseName);
+            const series = points.map(p => ({ date: p.date, e1rm: estimateEffectiveOneRM(ex, p.top), ambiguous: p.ambiguous }));
+            return series.slice(-maxPoints);
         };
 
         function buildSparklineSvg(values, opts = {}) {
@@ -3157,6 +3328,16 @@
                         ? confirm('Ya hay datos en esta app.\n\nAceptar = FUSIONAR (agrega lo del archivo sin borrar lo actual, evitando duplicados por fecha+día).\nCancelar = REEMPLAZAR TODO por el contenido del archivo.')
                         : true;
 
+                    // Backups de antes de que existiera hora_inicio no lo traen: se
+                    // completa igual que la migración de loadFromStorage, para que la
+                    // dedup de abajo y el orden cronológico tengan con qué trabajar.
+                    for (const sesion of incomingHistory) {
+                        if (!sesion.hora_inicio) {
+                            sesion.hora_inicio = sesion.date + 'T12:00:00.000Z';
+                            sesion.hora_estimada = true;
+                        }
+                    }
+
                     if (doMerge && hasExistingData) {
                         // Fusionar ejercicios (por nombre)
                         for (const ex of incomingExercises) {
@@ -3164,16 +3345,27 @@
                                 app.exercises.push(ex);
                             }
                         }
-                        // Fusionar sesiones (por fecha+día, para evitar duplicar la misma sesión)
+                        // Fusionar sesiones. Antes esto trataba "misma fecha+día" como
+                        // duplicado y descartaba la segunda sesión, lo que borraba
+                        // silenciosamente una sesión real si se entrenó dos veces el
+                        // mismo día. Ahora solo se considera duplicado si además
+                        // coincide la hora real (ambas no estimadas) o si el contenido
+                        // de las series es idéntico (re-importar el mismo backup).
                         let added = 0;
                         for (const sesion of incomingHistory) {
-                            const dup = app.history.some(h => h.date === sesion.date && h.day === sesion.day);
+                            const dup = app.history.some(h => {
+                                if (h.date !== sesion.date || h.day !== sesion.day) return false;
+                                if (h.hora_inicio && sesion.hora_inicio && !h.hora_estimada && !sesion.hora_estimada) {
+                                    return h.hora_inicio === sesion.hora_inicio;
+                                }
+                                return JSON.stringify(h.records || {}) === JSON.stringify(sesion.records || {});
+                            });
                             if (!dup) {
                                 app.history.push(sesion);
                                 added++;
                             }
                         }
-                        app.history.sort((a, b) => a.date.localeCompare(b.date));
+                        app.history.sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)));
                         // Fusionar peso corporal (por fecha, el archivo importado pisa el valor local si coinciden)
                         for (const entry of incomingBodyweight) {
                             const idx = app.bodyweightLog.findIndex(e => e.date === entry.date);
@@ -3210,13 +3402,13 @@
             }
 
             const rows = [[
-                'fecha', 'dia', 'tipo', 'ejercicio', 'ejercicio_id', 'grupo_muscular', 'patron', 'es_peso_corporal',
+                'fecha', 'hora_inicio', 'hora_estimada', 'dia', 'tipo', 'ejercicio', 'ejercicio_id', 'grupo_muscular', 'patron', 'es_peso_corporal',
                 'serie_num', 'peso_kg', 'reps', 'rir', 'unidad', 'rango_min', 'rango_max', 'rm_estimado',
                 'duracion_sesion_min', 'duracion_cardio_min', 'calorias', 'fc_promedio', 'carga_cardiovascular', 'min_zona_activa', 'distancia_km',
                 'notas'
             ]];
 
-            const sortedHistory = [...app.history].sort((a, b) => a.date.localeCompare(b.date));
+            const sortedHistory = [...app.history].sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)));
 
             for (const sesion of sortedHistory) {
                 const records = sesion.records || {};
@@ -3233,11 +3425,13 @@
 
                     sets.forEach((rec, idx) => {
                         if (!rec || rec.weight == null) return;
-                        const rm = rec.reps ? estimateOneRM(rec.weight, rec.reps) : '';
+                        const rm = rec.reps ? estimateEffectiveOneRM(exMeta, rec) : '';
                         const rmRounded = rm ? Math.round(rm * 10) / 10 : '';
 
                         rows.push([
                             sesion.date,
+                            sesion.hora_inicio || '',
+                            sesion.hora_estimada ? 'si' : 'no',
                             `"${dayLabel}"`,
                             'fuerza',
                             `"${exerciseName.replace(/"/g, '""')}"`,
@@ -3264,6 +3458,8 @@
                     const c = sesion.cardio;
                     rows.push([
                         sesion.date,
+                        sesion.hora_inicio || '',
+                        sesion.hora_estimada ? 'si' : 'no',
                         `"${dayLabel}"`,
                         'cardio',
                         '""', '', '', '', '',
