@@ -538,3 +538,33 @@ test('saveExerciseEdits avisa si renombrar el ejercicio lo hace coincidir con un
 
     assert.ok(alertMsg.includes('Pull'), `esperaba mención de "Pull" en: ${alertMsg}`);
 });
+
+test('exportCSV escribe BOM + UTF-8 (tildes/ñ se leen bien; sacar el BOM reintroduce el mojibake "SesiÃ³n")', () => {
+    let capturedParts = null;
+    const { app, exportCSV } = loadApp({
+        sandbox: {
+            URL: { createObjectURL: () => 'blob:fake', revokeObjectURL: () => {} },
+            Blob: function Blob(parts) { capturedParts = parts; }
+        }
+    });
+    app.exercises = [{ name: 'Sesión de tracción', day: 'Pull', sets: 1, repMin: 8, repMax: 12, unit: 'reps', bodyweight: false }];
+    app.history = [{
+        date: '2026-09-01', hora_inicio: '2026-09-01T08:00:00.000Z', hora_estimada: false, day: 'Pull',
+        notes: 'Día áspero, mañana ñoño',
+        records: { 'Sesión de tracción': [{ weight: 40, reps: 8, rir: 2 }] }
+    }];
+
+    exportCSV();
+
+    const csv = capturedParts.join('');
+    assert.ok(csv.startsWith('﻿'), 'el contenido del Blob debe empezar con el BOM');
+    assert.ok(csv.includes('Sesión de tracción') && csv.includes('áspero') && csv.includes('ñoño'));
+
+    // Reproduce el bug real: los mismos bytes, leídos SIN respetar el BOM
+    // (como Latin-1/CP1252), dan el mojibake que apareció en el export
+    // analizado. Sirve como evidencia de que sacar el BOM sería un downgrade.
+    const bytesWithBom = Buffer.from(csv, 'utf8');
+    const bytesWithoutBom = bytesWithBom.subarray(3); // 3 bytes del BOM en UTF-8
+    const misreadAsLatin1 = bytesWithoutBom.toString('latin1');
+    assert.ok(misreadAsLatin1.includes('SesiÃ³n de tracciÃ³n'), 'confirma el mecanismo del mojibake reportado');
+});

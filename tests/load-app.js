@@ -28,7 +28,8 @@ const EXPORTS = [
     'saveExerciseEdits',
     'removeExerciseFromRoutine',
     'sessionSortKey',
-    'estimateEffectiveOneRM'
+    'estimateEffectiveOneRM',
+    'exportCSV'
 ];
 
 function makeLocalStorage() {
