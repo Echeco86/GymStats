@@ -1030,6 +1030,13 @@
             return String(str == null ? '' : str).replace(/[&<>"']/g, c => map[c]);
         }
 
+        // Clave de orden cronológico de una sesión. Las sesiones nuevas siempre
+        // tienen hora_inicio real; las migradas desde antes de que existiera ese
+        // campo caen al mediodía de su fecha (hora_estimada=true en la sesión).
+        function sessionSortKey(sesion) {
+            return sesion.hora_inicio || (sesion.date + 'T12:00:00.000Z');
+        }
+
         // Se incrementa cuando cambia la forma del JSON exportado (export/import),
         // para poder detectar backups de una versión futura de la app.
         const BACKUP_SCHEMA_VERSION = 1;
@@ -1187,6 +1194,27 @@
                 } catch (e) {
                     console.error('Error loading data:', e);
                 }
+                this.runMigrations();
+            },
+
+            // Migraciones idempotentes sobre datos ya guardados en localStorage.
+            // Nunca borran ni inventan datos reales; solo completan campos que
+            // no existían en versiones previas de la app. Se corren en cada
+            // carga (son baratas) y solo persisten si de verdad cambió algo.
+            runMigrations() {
+                let changed = false;
+
+                for (const sesion of this.history) {
+                    if (!sesion.hora_inicio) {
+                        sesion.hora_inicio = sesion.date + 'T12:00:00.000Z';
+                        sesion.hora_estimada = true;
+                        changed = true;
+                    }
+                }
+
+                if (changed) {
+                    this.saveToStorage();
+                }
             },
 
             saveToStorage() {
@@ -1211,12 +1239,8 @@
             },
 
             getLastRecord(exerciseName) {
-                for (let i = this.history.length - 1; i >= 0; i--) {
-                    const sets = this.history[i].records && this.history[i].records[exerciseName];
-                    const topSet = this.topSetOf(sets);
-                    if (topSet) return topSet;
-                }
-                return null;
+                const points = this.getExerciseSessionPoints(exerciseName);
+                return points.length ? points[points.length - 1].top : null;
             },
 
             topSetOf(sets) {
@@ -1229,13 +1253,50 @@
             },
 
             getLastNRecords(exerciseName, n) {
-                const found = [];
-                for (let i = this.history.length - 1; i >= 0 && found.length < n; i--) {
-                    const sets = this.history[i].records && this.history[i].records[exerciseName];
-                    const topSet = this.topSetOf(sets);
-                    if (topSet) found.push(topSet);
+                const points = this.getExerciseSessionPoints(exerciseName);
+                return points.slice(-n).map(p => p.top);
+            },
+
+            // Un punto de progresión por fecha para exerciseName, en orden
+            // cronológico (por hora_inicio, con fallback a las 12:00 de `date`
+            // para sesiones migradas). Si dos o más sesiones comparten la misma
+            // fecha y alguna de ellas tiene hora_estimada, no sabemos el orden
+            // real entre ellas: se combinan en un solo punto ambiguo en vez de
+            // tratarlas como progresión ordenada punto-a-punto (ver item 1).
+            getExerciseSessionPoints(exerciseName) {
+                const sorted = [...this.history].sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)));
+
+                const groups = [];
+                let currentGroup = null;
+                for (const sesion of sorted) {
+                    if (currentGroup && currentGroup.date === sesion.date) {
+                        currentGroup.sessions.push(sesion);
+                    } else {
+                        currentGroup = { date: sesion.date, sessions: [sesion] };
+                        groups.push(currentGroup);
+                    }
                 }
-                return found.reverse();
+
+                const points = [];
+                for (const group of groups) {
+                    const anyEstimated = group.sessions.some(s => s.hora_estimada);
+                    if (group.sessions.length > 1 && anyEstimated) {
+                        const allSets = [];
+                        for (const s of group.sessions) {
+                            const sets = s.records && s.records[exerciseName];
+                            if (Array.isArray(sets)) allSets.push(...sets);
+                        }
+                        const top = this.topSetOf(allSets);
+                        if (top) points.push({ date: group.date, top, ambiguous: true });
+                    } else {
+                        for (const s of group.sessions) {
+                            const sets = s.records && s.records[exerciseName];
+                            const top = this.topSetOf(sets);
+                            if (top) points.push({ date: group.date, top, ambiguous: false });
+                        }
+                    }
+                }
+                return points;
             },
 
             getLastWeight(exerciseName) {
@@ -1326,10 +1387,13 @@
             },
 
             addSesión(records, notes = '', cardio = null, durationMin = null) {
-                const today = new Date().toISOString().split('T')[0];
+                const now = new Date();
+                const today = now.toISOString().split('T')[0];
                 const totalSets = Object.values(records).reduce((sum, sets) => sum + (Array.isArray(sets) ? sets.length : 0), 0);
                 const sesion = {
                     date: today,
+                    hora_inicio: now.toISOString(),
+                    hora_estimada: false,
                     day: this.selectedDay,
                     records: records,
                     notes: notes,
@@ -2926,14 +2990,9 @@
         };
 
         app.getExerciseE1RMSeries = function(exerciseName, maxPoints = 20) {
-            const sorted = [...this.history].sort((a, b) => a.date.localeCompare(b.date));
-            const points = [];
-            for (const sesion of sorted) {
-                const sets = sesion.records && sesion.records[exerciseName];
-                const top = this.topSetOf(sets);
-                if (top) points.push({ date: sesion.date, e1rm: estimateOneRM(top.weight, top.reps) });
-            }
-            return points.slice(-maxPoints);
+            const points = this.getExerciseSessionPoints(exerciseName);
+            const series = points.map(p => ({ date: p.date, e1rm: estimateOneRM(p.top.weight, p.top.reps), ambiguous: p.ambiguous }));
+            return series.slice(-maxPoints);
         };
 
         function buildSparklineSvg(values, opts = {}) {
@@ -3157,6 +3216,16 @@
                         ? confirm('Ya hay datos en esta app.\n\nAceptar = FUSIONAR (agrega lo del archivo sin borrar lo actual, evitando duplicados por fecha+día).\nCancelar = REEMPLAZAR TODO por el contenido del archivo.')
                         : true;
 
+                    // Backups de antes de que existiera hora_inicio no lo traen: se
+                    // completa igual que la migración de loadFromStorage, para que la
+                    // dedup de abajo y el orden cronológico tengan con qué trabajar.
+                    for (const sesion of incomingHistory) {
+                        if (!sesion.hora_inicio) {
+                            sesion.hora_inicio = sesion.date + 'T12:00:00.000Z';
+                            sesion.hora_estimada = true;
+                        }
+                    }
+
                     if (doMerge && hasExistingData) {
                         // Fusionar ejercicios (por nombre)
                         for (const ex of incomingExercises) {
@@ -3164,16 +3233,27 @@
                                 app.exercises.push(ex);
                             }
                         }
-                        // Fusionar sesiones (por fecha+día, para evitar duplicar la misma sesión)
+                        // Fusionar sesiones. Antes esto trataba "misma fecha+día" como
+                        // duplicado y descartaba la segunda sesión, lo que borraba
+                        // silenciosamente una sesión real si se entrenó dos veces el
+                        // mismo día. Ahora solo se considera duplicado si además
+                        // coincide la hora real (ambas no estimadas) o si el contenido
+                        // de las series es idéntico (re-importar el mismo backup).
                         let added = 0;
                         for (const sesion of incomingHistory) {
-                            const dup = app.history.some(h => h.date === sesion.date && h.day === sesion.day);
+                            const dup = app.history.some(h => {
+                                if (h.date !== sesion.date || h.day !== sesion.day) return false;
+                                if (h.hora_inicio && sesion.hora_inicio && !h.hora_estimada && !sesion.hora_estimada) {
+                                    return h.hora_inicio === sesion.hora_inicio;
+                                }
+                                return JSON.stringify(h.records || {}) === JSON.stringify(sesion.records || {});
+                            });
                             if (!dup) {
                                 app.history.push(sesion);
                                 added++;
                             }
                         }
-                        app.history.sort((a, b) => a.date.localeCompare(b.date));
+                        app.history.sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)));
                         // Fusionar peso corporal (por fecha, el archivo importado pisa el valor local si coinciden)
                         for (const entry of incomingBodyweight) {
                             const idx = app.bodyweightLog.findIndex(e => e.date === entry.date);
@@ -3210,13 +3290,13 @@
             }
 
             const rows = [[
-                'fecha', 'dia', 'tipo', 'ejercicio', 'ejercicio_id', 'grupo_muscular', 'patron', 'es_peso_corporal',
+                'fecha', 'hora_inicio', 'hora_estimada', 'dia', 'tipo', 'ejercicio', 'ejercicio_id', 'grupo_muscular', 'patron', 'es_peso_corporal',
                 'serie_num', 'peso_kg', 'reps', 'rir', 'unidad', 'rango_min', 'rango_max', 'rm_estimado',
                 'duracion_sesion_min', 'duracion_cardio_min', 'calorias', 'fc_promedio', 'carga_cardiovascular', 'min_zona_activa', 'distancia_km',
                 'notas'
             ]];
 
-            const sortedHistory = [...app.history].sort((a, b) => a.date.localeCompare(b.date));
+            const sortedHistory = [...app.history].sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)));
 
             for (const sesion of sortedHistory) {
                 const records = sesion.records || {};
@@ -3238,6 +3318,8 @@
 
                         rows.push([
                             sesion.date,
+                            sesion.hora_inicio || '',
+                            sesion.hora_estimada ? 'si' : 'no',
                             `"${dayLabel}"`,
                             'fuerza',
                             `"${exerciseName.replace(/"/g, '""')}"`,
@@ -3264,6 +3346,8 @@
                     const c = sesion.cardio;
                     rows.push([
                         sesion.date,
+                        sesion.hora_inicio || '',
+                        sesion.hora_estimada ? 'si' : 'no',
                         `"${dayLabel}"`,
                         'cardio',
                         '""', '', '', '', '',

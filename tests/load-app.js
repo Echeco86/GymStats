@@ -26,7 +26,8 @@ const EXPORTS = [
     'BACKUP_SCHEMA_VERSION',
     'addExerciseToToday',
     'saveExerciseEdits',
-    'removeExerciseFromRoutine'
+    'removeExerciseFromRoutine',
+    'sessionSortKey'
 ];
 
 function makeLocalStorage() {

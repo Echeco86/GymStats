@@ -323,3 +323,80 @@ test('removeExerciseFromRoutine no hace nada si el usuario cancela la confirmaci
 
     assert.equal(app.exercises.length, 1);
 });
+
+test('sessionSortKey usa hora_inicio real, o el mediodía de la fecha como fallback', () => {
+    const { sessionSortKey } = loadApp();
+    assert.equal(sessionSortKey({ date: '2026-08-01', hora_inicio: '2026-08-01T07:30:00.000Z' }), '2026-08-01T07:30:00.000Z');
+    assert.equal(sessionSortKey({ date: '2026-08-01' }), '2026-08-01T12:00:00.000Z');
+});
+
+test('runMigrations agrega hora_inicio estimada a sesiones viejas sin tocar las que ya la tienen', () => {
+    const { app } = loadApp();
+    app.history = [
+        { date: '2026-07-01', day: 'Push', records: {} },
+        { date: '2026-07-08', hora_inicio: '2026-07-08T09:00:00.000Z', hora_estimada: false, day: 'Push', records: {} }
+    ];
+
+    app.runMigrations();
+
+    assert.equal(app.history[0].hora_inicio, '2026-07-01T12:00:00.000Z');
+    assert.equal(app.history[0].hora_estimada, true);
+    // La sesión que ya tenía hora real no se toca.
+    assert.equal(app.history[1].hora_inicio, '2026-07-08T09:00:00.000Z');
+    assert.equal(app.history[1].hora_estimada, false);
+});
+
+test('getExerciseSessionPoints combina en un punto ambiguo dos sesiones estimadas del mismo día', () => {
+    const { app } = loadApp();
+    app.history = [
+        { date: '2026-08-01', hora_inicio: '2026-08-01T12:00:00.000Z', hora_estimada: true, day: 'Push', records: { 'Dominadas': [{ weight: 0, reps: 6, rir: 2 }] } },
+        { date: '2026-08-01', hora_inicio: '2026-08-01T12:00:00.000Z', hora_estimada: true, day: 'Push', records: { 'Dominadas': [{ weight: 0, reps: 9, rir: 1 }] } },
+        { date: '2026-08-08', hora_inicio: '2026-08-08T12:00:00.000Z', hora_estimada: true, day: 'Push', records: { 'Dominadas': [{ weight: 0, reps: 8, rir: 2 }] } }
+    ];
+
+    const points = app.getExerciseSessionPoints('Dominadas');
+
+    assert.equal(points.length, 2, 'las 2 sesiones ambiguas del 1/8 deberían colapsar en un solo punto');
+    assert.equal(points[0].date, '2026-08-01');
+    assert.equal(points[0].ambiguous, true);
+    assert.equal(points[1].date, '2026-08-08');
+    assert.equal(points[1].ambiguous, false);
+});
+
+test('getExerciseSessionPoints NO combina dos sesiones del mismo día si ambas tienen hora real', () => {
+    const { app } = loadApp();
+    app.history = [
+        { date: '2026-08-01', hora_inicio: '2026-08-01T08:00:00.000Z', hora_estimada: false, day: 'Push', records: { 'Press banca': [{ weight: 40, reps: 8, rir: 2 }] } },
+        { date: '2026-08-01', hora_inicio: '2026-08-01T19:00:00.000Z', hora_estimada: false, day: 'Push', records: { 'Press banca': [{ weight: 42.5, reps: 6, rir: 1 }] } }
+    ];
+
+    const points = app.getExerciseSessionPoints('Press banca');
+
+    assert.equal(points.length, 2, 'con hora real conocida, dos sesiones el mismo día son puntos distintos');
+    assert.equal(points.every(p => !p.ambiguous), true);
+});
+
+test('importData ya NO descarta una segunda sesión real del mismo día (bug de fusión por fecha)', () => {
+    const morningSesion = { date: '2026-09-01', hora_inicio: '2026-09-01T08:00:00.000Z', hora_estimada: false, day: 'Push', records: { 'Press banca': [{ weight: 40, reps: 8, rir: 2 }] } };
+    const eveningSesion = { date: '2026-09-01', hora_inicio: '2026-09-01T19:00:00.000Z', hora_estimada: false, day: 'Push', records: { 'Sentadilla': [{ weight: 80, reps: 5, rir: 1 }] } };
+
+    const { app, importData } = loadAppWithBackupIO([true], JSON.stringify({ exercises: [], history: [eveningSesion] }));
+    app.exercises = [];
+    app.history = [morningSesion];
+
+    importData({ target: { files: [{}], value: '' } });
+
+    assert.equal(app.history.length, 2, 'las dos sesiones reales del mismo día deben conservarse por separado');
+});
+
+test('importData sigue deduplicando si se re-importa exactamente el mismo backup', () => {
+    const sesion = { date: '2026-09-01', hora_inicio: '2026-09-01T08:00:00.000Z', hora_estimada: false, day: 'Push', records: { 'Press banca': [{ weight: 40, reps: 8, rir: 2 }] } };
+
+    const { app, importData } = loadAppWithBackupIO([true], JSON.stringify({ exercises: [], history: [sesion] }));
+    app.exercises = [];
+    app.history = [sesion];
+
+    importData({ target: { files: [{}], value: '' } });
+
+    assert.equal(app.history.length, 1, 'reimportar la sesión idéntica no debería duplicarla');
+});
