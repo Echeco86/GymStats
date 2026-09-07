@@ -475,3 +475,66 @@ test('runMigrations corrige el catálogo existente de false a true, nunca al rev
     assert.equal(app.exercises[2].bodyweight, false, 'Press banca no matchea el patrón, se deja como está');
     assert.equal(app.exercises[3].bodyweight, true, 'un true existente nunca se pisa');
 });
+
+test('addExerciseToToday avisa (sin bloquear) si el ejercicio ya está en otro día', () => {
+    const fields = {
+        newExerciseName: 'Plancha', newExerciseSets: '3', newExerciseRepMin: '30', newExerciseRepMax: '60',
+        newExerciseBodyweight: false, newExerciseTimeBased: false
+    };
+    let alertMsg = null;
+    const { app, addExerciseToToday } = loadApp({
+        sandbox: {
+            document: (() => {
+                const doc = makeFieldStubDocument(fields);
+                const realGetAlert = doc.getElementById;
+                doc.getElementById = (id) => {
+                    const el = realGetAlert(id);
+                    if (id === 'globalStatus') {
+                        Object.defineProperty(el, 'innerHTML', { set: (v) => { alertMsg = v; }, get: () => alertMsg || '' });
+                    }
+                    return el;
+                };
+                return doc;
+            })()
+        }
+    });
+    app.exercises = [{ name: 'Plancha', day: 'Push', sets: 3, repMin: 30, repMax: 60, unit: 'seg', bodyweight: true }];
+    app.selectedDay = 'Core';
+
+    addExerciseToToday();
+
+    assert.equal(app.exercises.length, 2, 'el ejercicio se agrega igual, el aviso no bloquea');
+    assert.ok(alertMsg.includes('Push'), `esperaba mención de "Push" en: ${alertMsg}`);
+});
+
+test('saveExerciseEdits avisa si renombrar el ejercicio lo hace coincidir con uno de otro día', () => {
+    const fields = {
+        'exercise-editor-name-0': 'Dominadas', 'exercise-editor-sets-0': '3',
+        'exercise-editor-repmin-0': '6', 'exercise-editor-repmax-0': '10',
+        'exercise-editor-bw-0': false, 'exercise-editor-time-0': false
+    };
+    let alertMsg = null;
+    const { app, saveExerciseEdits } = loadApp({
+        sandbox: {
+            document: (() => {
+                const doc = makeFieldStubDocument(fields);
+                const realGetAlert = doc.getElementById;
+                doc.getElementById = (id) => {
+                    const el = realGetAlert(id);
+                    if (id === 'globalStatus') {
+                        Object.defineProperty(el, 'innerHTML', { set: (v) => { alertMsg = v; }, get: () => alertMsg || '' });
+                    }
+                    return el;
+                };
+                return doc;
+            })()
+        }
+    });
+    const original = { name: 'Press banca', day: 'Push', sets: 3, repMin: 8, repMax: 12, unit: 'reps', bodyweight: false };
+    app.exercises = [original, { name: 'Dominadas', day: 'Pull', sets: 3, repMin: 6, repMax: 10, unit: 'reps', bodyweight: true }];
+    app._trackExercises = [original];
+
+    saveExerciseEdits(0);
+
+    assert.ok(alertMsg.includes('Pull'), `esperaba mención de "Pull" en: ${alertMsg}`);
+});

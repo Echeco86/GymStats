@@ -1847,6 +1847,19 @@
                 return;
             }
 
+            // Mismo nombre bajo 2+ días en el resultado final: puede ser un
+            // ejercicio que a propósito pertenece a varias plantillas, o un
+            // nombre repetido por accidente. No bloquea el guardado, solo avisa.
+            const daysByName = new Map();
+            for (const item of valid) {
+                if (!daysByName.has(item.name)) daysByName.set(item.name, new Set());
+                daysByName.get(item.name).add(item.day);
+            }
+            const conflicts = Array.from(daysByName.entries()).filter(([, days]) => days.size > 1);
+            const warning = conflicts.length
+                ? ` ⚠️ Ojo: ${conflicts.map(([name, days]) => `"${name}" está en ${Array.from(days).join(', ')}`).join('; ')}. Si no fue intencional, revisalo.`
+                : '';
+
             app.exercises = valid;
             app.currentRoutine = new Date().toISOString().split('T')[0];
             app.selectedDay = valid[0].day;
@@ -1854,7 +1867,7 @@
 
             document.getElementById('manualEditContainer').style.display = 'none';
             document.getElementById('uploadContainer').style.display = 'block';
-            app.showAlert(`✓ ${valid.length} ejercicios guardados`, 'success');
+            app.showAlert(`✓ ${valid.length} ejercicios guardados.${warning}`, 'success');
             switchTab('track');
         };
 
@@ -2711,6 +2724,7 @@
             const sets = Math.max(1, parseInt(setsVal, 10) || ex.sets || 3);
 
             const oldName = ex.name;
+            const warning = dayConflictSuffix(newName, ex.day);
             app.exercises[globalIdx] = {
                 ...ex,
                 name: newName,
@@ -2731,7 +2745,7 @@
             }
 
             app.saveToStorage();
-            app.showAlert('✓ Ejercicio actualizado', 'success');
+            app.showAlert(`✓ Ejercicio actualizado.${warning}`, 'success');
             app.refreshTrack();
         };
 
@@ -2765,6 +2779,25 @@
             restoreFormValues(snapshot);
         };
 
+        // Días (distintos de excludeDay) bajo los que ya existe un ejercicio con
+        // ese nombre en el catálogo. Sirve para avisar (sin bloquear el guardado)
+        // si el mismo ejercicio quedó repartido en más de una plantilla sin que
+        // haya sido una decisión explícita — típicamente un nombre repetido por
+        // accidente en vez de una reutilización intencional del movimiento.
+        function getOtherDaysForExercise(name, excludeDay) {
+            const days = new Set();
+            for (const ex of app.exercises) {
+                if (ex.name === name && ex.day && ex.day !== excludeDay) days.add(ex.day);
+            }
+            return Array.from(days);
+        }
+
+        function dayConflictSuffix(name, day) {
+            const otherDays = getOtherDaysForExercise(name, day);
+            if (!otherDays.length) return '';
+            return ` ⚠️ Ojo: "${name}" también está en ${otherDays.join(', ')}. Si no fue intencional, revisalo.`;
+        }
+
         window.addExerciseToToday = function() {
             const name = (document.getElementById('newExerciseName').value || '').trim();
             if (!name) {
@@ -2784,11 +2817,12 @@
             const sets = Math.max(1, parseInt(setsVal, 10) || 3);
             const day = app.selectedDay || 'General';
 
+            const warning = dayConflictSuffix(name, day);
             app.exercises.push({ name, day, sets, repMin, repMax, unit: timeBased ? 'seg' : 'reps', bodyweight });
 
             app._addExerciseFormOpen = false;
             app.saveToStorage();
-            app.showAlert(`✓ "${name}" agregado a ${day}`, 'success');
+            app.showAlert(`✓ "${name}" agregado a ${day}.${warning}`, 'success');
             app.refreshTrack();
         };
 
