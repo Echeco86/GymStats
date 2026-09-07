@@ -1212,6 +1212,24 @@
                     }
                 }
 
+                // Catálogo: ejercicios que son a peso corporal por definición
+                // (dominadas, fondos, sentadilla pistol, curl nórdico...) pero
+                // quedaron marcados bodyweight=false, por ejemplo por venir de
+                // un PDF con un nombre que el clasificador de esa época no
+                // reconocía. Solo corrige false->true, nunca al revés, para no
+                // pisar una elección explícita del usuario.
+                let bodyweightFixed = 0;
+                for (const ex of this.exercises) {
+                    if (!ex.bodyweight && classifyExercise(ex.name || '').bodyweight) {
+                        ex.bodyweight = true;
+                        bodyweightFixed++;
+                    }
+                }
+                if (bodyweightFixed > 0) {
+                    changed = true;
+                    this.showAlert(`✓ Se corrigieron ${bodyweightFixed} ejercicio(s) marcados como peso corporal`, 'success');
+                }
+
                 if (changed) {
                     this.saveToStorage();
                 }
@@ -1725,7 +1743,8 @@
                         </div>
                         <div class="edit-field">
                             <label class="edit-label">Nombre</label>
-                            <input type="text" class="edit-input" data-manual-field="name" value="${escapeHtml(item.name || '')}">
+                            <input type="text" class="edit-input" data-manual-field="name" value="${escapeHtml(item.name || '')}"
+                                   oninput="autoSuggestBodyweight(this, this.closest('[data-manual-idx]').querySelector('[data-manual-field=&quot;bodyweight&quot;]'))">
                         </div>
                         <div class="edit-field">
                             <label class="edit-label">Día (ej: Push, Pull, Piernas)</label>
@@ -1747,7 +1766,7 @@
                         </div>
                         <div class="edit-field" style="display: flex; gap: 16px; align-items: center;">
                             <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
-                                <input type="checkbox" data-manual-field="bodyweight" ${item.bodyweight ? 'checked' : ''}> Peso corporal
+                                <input type="checkbox" data-manual-field="bodyweight" ${item.bodyweight ? 'checked' : ''} onchange="this.dataset.touched='true'"> Peso corporal
                             </label>
                             <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
                                 <input type="checkbox" data-manual-field="timeBased" ${item.unit === 'seg' ? 'checked' : ''}> Se mide en segundos
@@ -2124,7 +2143,7 @@
 
         function classifyExercise(name) {
             const lower = name.toLowerCase();
-            const bodyweight = /domin|flexi|fondos|plancha/.test(lower);
+            const bodyweight = /domin|flexi|fondos|plancha|pistol|n[oó]rdic|muscle.?up|chin.?up|push.?up|\bdips?\b/.test(lower);
             const timeBased = /plancha|isometric/.test(lower);
             return { bodyweight, timeBased };
         }
@@ -2459,7 +2478,8 @@
                         <div class="exercise-editor" id="exercise-editor-${exIdx}" style="display: none;">
                             <div class="edit-field">
                                 <label class="edit-label">Nombre del ejercicio</label>
-                                <input type="text" class="edit-input" id="exercise-editor-name-${exIdx}" value="${escapeHtml(ex.name)}">
+                                <input type="text" class="edit-input" id="exercise-editor-name-${exIdx}" value="${escapeHtml(ex.name)}"
+                                       oninput="autoSuggestBodyweight(this, document.getElementById('exercise-editor-bw-${exIdx}'))">
                             </div>
                             <div class="edit-field" style="display: flex; gap: 8px;">
                                 <div style="flex: 1;">
@@ -2477,7 +2497,7 @@
                             </div>
                             <div class="edit-field" style="display: flex; gap: 16px; align-items: center;">
                                 <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
-                                    <input type="checkbox" id="exercise-editor-bw-${exIdx}" ${ex.bodyweight ? 'checked' : ''}> Peso corporal
+                                    <input type="checkbox" id="exercise-editor-bw-${exIdx}" ${ex.bodyweight ? 'checked' : ''} onchange="this.dataset.touched='true'"> Peso corporal
                                 </label>
                                 <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
                                     <input type="checkbox" id="exercise-editor-time-${exIdx}" ${ex.unit === 'seg' ? 'checked' : ''}> Se mide en segundos
@@ -2551,7 +2571,8 @@
                     <div id="addExerciseForm" style="display: ${addExerciseOpen ? 'block' : 'none'}; margin-top: 10px;">
                         <div class="edit-field">
                             <label class="edit-label">Nombre del ejercicio</label>
-                            <input type="text" class="edit-input" id="newExerciseName" placeholder="Ej: Remo en polea baja">
+                            <input type="text" class="edit-input" id="newExerciseName" placeholder="Ej: Remo en polea baja"
+                                   oninput="autoSuggestBodyweight(this, document.getElementById('newExerciseBodyweight'))">
                         </div>
                         <div class="edit-field" style="display: flex; gap: 8px;">
                             <div style="flex: 1;">
@@ -2569,7 +2590,7 @@
                         </div>
                         <div class="edit-field" style="display: flex; gap: 16px; align-items: center;">
                             <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
-                                <input type="checkbox" id="newExerciseBodyweight"> Peso corporal
+                                <input type="checkbox" id="newExerciseBodyweight" onchange="this.dataset.touched='true'"> Peso corporal
                             </label>
                             <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
                                 <input type="checkbox" id="newExerciseTimeBased"> Se mide en segundos
@@ -2728,6 +2749,13 @@
             app.saveToStorage();
             app.showAlert('Ejercicio quitado de la rutina', 'success');
             app.refreshTrack();
+        };
+
+        // Sugiere "peso corporal" según el nombre tipeado, sin pisar la
+        // elección del usuario si ya tocó el checkbox a mano (dataset.touched).
+        window.autoSuggestBodyweight = function(nameInput, checkbox) {
+            if (!checkbox || checkbox.dataset.touched === 'true') return;
+            checkbox.checked = classifyExercise(nameInput.value || '').bodyweight;
         };
 
         window.toggleAddExerciseForm = function() {

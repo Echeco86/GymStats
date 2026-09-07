@@ -445,3 +445,33 @@ test('getExerciseE1RMSeries no descarta las series sin lastre de un ejercicio a 
     assert.ok(series.every(p => p.e1rm > 0));
     assert.ok(series[1].e1rm > series[0].e1rm, 'agregar lastre debería seguir subiendo la misma curva, no una serie nueva');
 });
+
+test('classifyExercise reconoce sentadilla pistol y curl nórdico como peso corporal', () => {
+    const { classifyExercise } = loadApp();
+    assert.equal(classifyExercise('Sentadilla pistol').bodyweight, true);
+    assert.equal(classifyExercise('Curl nórdico').bodyweight, true);
+    assert.equal(classifyExercise('Curl nordico').bodyweight, true, 'debería tolerar la falta de tilde');
+    assert.equal(classifyExercise('Dominadas supinadas').bodyweight, true);
+    assert.equal(classifyExercise('Fondos en paralelas').bodyweight, true);
+    assert.equal(classifyExercise('Chin-up').bodyweight, true);
+    assert.equal(classifyExercise('Push-up').bodyweight, true);
+    assert.equal(classifyExercise('Press banca').bodyweight, false);
+});
+
+test('runMigrations corrige el catálogo existente de false a true, nunca al revés', () => {
+    const { app } = loadApp();
+    app.exercises = [
+        { name: 'Sentadilla pistol', bodyweight: false },
+        { name: 'Curl nórdico', bodyweight: false },
+        { name: 'Press banca', bodyweight: false },
+        { name: 'Curl con mancuerna', bodyweight: true } // explícitamente marcado por el usuario, no debe tocarse
+    ];
+    app.history = [];
+
+    app.runMigrations();
+
+    assert.equal(app.exercises[0].bodyweight, true);
+    assert.equal(app.exercises[1].bodyweight, true);
+    assert.equal(app.exercises[2].bodyweight, false, 'Press banca no matchea el patrón, se deja como está');
+    assert.equal(app.exercises[3].bodyweight, true, 'un true existente nunca se pisa');
+});
