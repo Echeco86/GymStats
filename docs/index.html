@@ -2896,7 +2896,12 @@
                         if (weightInput) weightInput.style.borderColor = 'var(--danger-text)';
                         errorState.hasError = true;
                     }
-                    if (weight !== null && reps !== null) {
+                    if (weight !== null && reps !== null && rir === null) {
+                        if (rirInput) rirInput.style.borderColor = 'var(--danger-text)';
+                        errorState.hasError = true;
+                        errorState.missingRir = true;
+                    }
+                    if (weight !== null && reps !== null && rir !== null) {
                         sets.push({ weight, reps, rir });
                     }
                 });
@@ -2905,7 +2910,12 @@
             }
 
             if (errorState.hasError) {
-                app.showAlert('Completa peso Y reps juntos en cada serie (o dejala vacía si no la hiciste)', 'error');
+                app.showAlert(
+                    errorState.missingRir
+                        ? 'Completa peso, reps Y RIR en cada serie (o dejala vacía si no la hiciste)'
+                        : 'Completa peso Y reps juntos en cada serie (o dejala vacía si no la hiciste)',
+                    'error'
+                );
                 return;
             }
 
