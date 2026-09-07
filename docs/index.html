@@ -1245,11 +1245,18 @@
 
             topSetOf(sets) {
                 if (!Array.isArray(sets) || !sets.length) return null;
-                let best = sets[0];
+                let best = null;
                 for (const s of sets) {
-                    if (s && s.weight != null && (best.weight == null || s.weight > best.weight)) best = s;
+                    if (!s || s.weight == null) continue;
+                    if (!best) { best = s; continue; }
+                    // A igual peso (incluido 0kg extra en ejercicios a peso
+                    // corporal, donde todas las series empatan en 0), la mejor
+                    // marca es la de más reps, no la primera que aparece.
+                    if (s.weight > best.weight || (s.weight === best.weight && (s.reps || 0) > (best.reps || 0))) {
+                        best = s;
+                    }
                 }
-                return best && best.weight != null ? best : null;
+                return best;
             },
 
             getLastNRecords(exerciseName, n) {
@@ -1297,6 +1304,17 @@
                     }
                 }
                 return points;
+            },
+
+            // Peso corporal de referencia para e1RM efectivo en ejercicios a
+            // peso corporal: el último registrado en la pestaña Peso, o un
+            // valor genérico si todavía no se cargó ninguno.
+            getReferenceBodyweight() {
+                if (this.bodyweightLog && this.bodyweightLog.length) {
+                    const sorted = [...this.bodyweightLog].sort((a, b) => a.date.localeCompare(b.date));
+                    return sorted[sorted.length - 1].weight;
+                }
+                return 70;
             },
 
             getLastWeight(exerciseName) {
@@ -1365,10 +1383,11 @@
             },
 
             checkStagnation(exerciseName) {
+                const ex = this.exercises.find(e => e.name === exerciseName);
                 const records = this.getLastNRecords(exerciseName, 3);
                 if (records.length < 3) return false;
 
-                const rms = records.map(r => estimateOneRM(r.weight || 0.1, r.reps));
+                const rms = records.map(r => estimateEffectiveOneRM(ex, r));
                 const noProgress = rms[1] <= rms[0] + 0.01 && rms[2] <= rms[1] + 0.01;
                 return noProgress;
             },
@@ -1821,10 +1840,30 @@
         };
 
         window.estimateOneRM = function(weight, reps) {
-            if (!weight || !reps || reps <= 0) return 0;
+            if (weight == null || !reps || reps <= 0) return 0;
             if (reps === 1) return weight;
             return weight * (1 + reps / 30);
         };
+
+        // e1RM "efectivo" para poder comparar progreso en ejercicios a peso
+        // corporal (peso_kg=0 mientras no se agrega lastre) contra la misma
+        // curva una vez que sí se agrega lastre. Sin esto, estimateOneRM da 0
+        // para toda serie sin lastre y el ejercicio desaparece de la curva de
+        // progresión aunque las reps sí estén mejorando.
+        //
+        // Se usa peso_corporal_referencia + lastre como el "peso" de Epley.
+        // La referencia es el último peso corporal cargado (o 70kg si nunca
+        // se cargó ninguno): es una constante para TODO el historial del
+        // ejercicio, así que la curva queda continua y comparable en ambas
+        // fases (sin lastre y con lastre), en vez de saltar o reiniciarse.
+        function estimateEffectiveOneRM(exercise, set) {
+            if (!set || set.reps == null) return 0;
+            if (exercise && exercise.bodyweight) {
+                const bw = app.getReferenceBodyweight();
+                return estimateOneRM(bw + (set.weight || 0), set.reps);
+            }
+            return estimateOneRM(set.weight, set.reps);
+        }
 
         window.findExerciseByPattern = function(pattern) {
             const lower = pattern.toLowerCase();
@@ -2933,8 +2972,8 @@
 
                 let progress = '';
                 if (last && prev) {
-                    const rmLast = estimateOneRM(last.weight, last.reps);
-                    const rmPrev = estimateOneRM(prev.weight, prev.reps);
+                    const rmLast = estimateEffectiveOneRM(ex, last);
+                    const rmPrev = estimateEffectiveOneRM(ex, prev);
                     const diff = rmLast - rmPrev;
                     if (diff > 0.5) {
                         progress = `<span class="progress-badge progress-up">+${diff.toFixed(1)} 1RM</span>`;
@@ -2990,8 +3029,9 @@
         };
 
         app.getExerciseE1RMSeries = function(exerciseName, maxPoints = 20) {
+            const ex = this.exercises.find(e => e.name === exerciseName);
             const points = this.getExerciseSessionPoints(exerciseName);
-            const series = points.map(p => ({ date: p.date, e1rm: estimateOneRM(p.top.weight, p.top.reps), ambiguous: p.ambiguous }));
+            const series = points.map(p => ({ date: p.date, e1rm: estimateEffectiveOneRM(ex, p.top), ambiguous: p.ambiguous }));
             return series.slice(-maxPoints);
         };
 
@@ -3313,7 +3353,7 @@
 
                     sets.forEach((rec, idx) => {
                         if (!rec || rec.weight == null) return;
-                        const rm = rec.reps ? estimateOneRM(rec.weight, rec.reps) : '';
+                        const rm = rec.reps ? estimateEffectiveOneRM(exMeta, rec) : '';
                         const rmRounded = rm ? Math.round(rm * 10) / 10 : '';
 
                         rows.push([

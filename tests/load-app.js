@@ -27,7 +27,8 @@ const EXPORTS = [
     'addExerciseToToday',
     'saveExerciseEdits',
     'removeExerciseFromRoutine',
-    'sessionSortKey'
+    'sessionSortKey',
+    'estimateEffectiveOneRM'
 ];
 
 function makeLocalStorage() {

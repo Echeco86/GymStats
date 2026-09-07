@@ -400,3 +400,48 @@ test('importData sigue deduplicando si se re-importa exactamente el mismo backup
 
     assert.equal(app.history.length, 1, 'reimportar la sesión idéntica no debería duplicarla');
 });
+
+test('topSetOf desempata por reps cuando el peso es igual (ej. 0kg en peso corporal)', () => {
+    const { app } = loadApp();
+    const best = app.topSetOf([{ weight: 0, reps: 6, rir: 2 }, { weight: 0, reps: 9, rir: 1 }, { weight: 0, reps: 4, rir: 3 }]);
+    assert.equal(best.reps, 9, 'con todo el peso empatado en 0, la mejor marca es la de más reps');
+
+    // Sigue priorizando peso por sobre reps cuando el peso SÍ difiere (comportamiento previo intacto).
+    const bestWeighted = app.topSetOf([{ weight: 40, reps: 10 }, { weight: 42.5, reps: 6 }]);
+    assert.equal(bestWeighted.weight, 42.5);
+});
+
+test('estimateEffectiveOneRM da 0 solo por falta de datos, nunca por peso_kg=0 en un ejercicio a peso corporal', () => {
+    const { app, estimateEffectiveOneRM } = loadApp();
+    app.bodyweightLog = [{ date: '2026-07-01', weight: 80 }];
+    const dominadas = { name: 'Dominadas', bodyweight: true };
+
+    const sinLastre = estimateEffectiveOneRM(dominadas, { weight: 0, reps: 8 });
+    assert.ok(sinLastre > 0, 'peso_kg=0 en un ejercicio a peso corporal no debería dar e1RM=0');
+
+    const masReps = estimateEffectiveOneRM(dominadas, { weight: 0, reps: 10 });
+    assert.ok(masReps > sinLastre, 'más reps al mismo peso corporal debería reflejar más progreso');
+
+    const conLastre = estimateEffectiveOneRM(dominadas, { weight: 5, reps: 8 });
+    assert.ok(conLastre > sinLastre, 'agregar lastre a las mismas reps debería subir el e1RM efectivo');
+
+    // Un ejercicio NO marcado como bodyweight sigue usando el peso tal cual (sin sumar peso corporal).
+    const banca = { name: 'Press banca', bodyweight: false };
+    assert.equal(estimateEffectiveOneRM(banca, { weight: 0, reps: 8 }), 0);
+});
+
+test('getExerciseE1RMSeries no descarta las series sin lastre de un ejercicio a peso corporal', () => {
+    const { app } = loadApp();
+    app.exercises = [{ name: 'Dominadas', bodyweight: true }];
+    app.bodyweightLog = [{ date: '2026-07-01', weight: 80 }];
+    app.history = [
+        { date: '2026-07-05', hora_inicio: '2026-07-05T08:00:00.000Z', hora_estimada: false, records: { 'Dominadas': [{ weight: 0, reps: 6, rir: 2 }] } },
+        { date: '2026-07-12', hora_inicio: '2026-07-12T08:00:00.000Z', hora_estimada: false, records: { 'Dominadas': [{ weight: 5, reps: 6, rir: 2 }] } }
+    ];
+
+    const series = app.getExerciseE1RMSeries('Dominadas');
+
+    assert.equal(series.length, 2, 'la serie sin lastre no debería desaparecer de la curva');
+    assert.ok(series.every(p => p.e1rm > 0));
+    assert.ok(series[1].e1rm > series[0].e1rm, 'agregar lastre debería seguir subiendo la misma curva, no una serie nueva');
+});
