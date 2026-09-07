@@ -23,7 +23,10 @@ const EXPORTS = [
     'buildSparklineSvg',
     'exportData',
     'importData',
-    'BACKUP_SCHEMA_VERSION'
+    'BACKUP_SCHEMA_VERSION',
+    'addExerciseToToday',
+    'saveExerciseEdits',
+    'removeExerciseFromRoutine'
 ];
 
 function makeLocalStorage() {

@@ -231,3 +231,95 @@ test('importData reemplaza los datos si el usuario acepta el aviso de versión f
 
     assert.deepEqual(Array.from(app.exercises, e => e.name), ['Peso muerto']);
 });
+
+// Stub de document que resuelve getElementById por id contra un mapa fijo de
+// valores, para testear funciones que leen varios inputs sueltos del DOM
+// (el editor de ejercicio, el formulario de alta) sin depender de querySelector.
+function makeFieldStubDocument(fields) {
+    const store = {};
+    for (const [id, val] of Object.entries(fields)) {
+        store[id] = typeof val === 'boolean'
+            ? { checked: val, value: '', style: {}, innerHTML: '' }
+            : { value: String(val), checked: false, style: {}, innerHTML: '' };
+    }
+    return {
+        getElementById: (id) => store[id] || (store[id] = { value: '', checked: false, style: {}, innerHTML: '' }),
+        querySelectorAll: () => [],
+        addEventListener: () => {},
+        createElement: () => ({ style: {}, click() {}, remove() {} }),
+        body: { appendChild() {}, removeChild() {} }
+    };
+}
+
+test('addExerciseToToday agrega un ejercicio nuevo al día seleccionado', () => {
+    const fields = {
+        newExerciseName: 'Remo en polea baja',
+        newExerciseSets: '4',
+        newExerciseRepMin: '10',
+        newExerciseRepMax: '15',
+        newExerciseBodyweight: false,
+        newExerciseTimeBased: false
+    };
+    const { app, addExerciseToToday } = loadApp({ sandbox: { document: makeFieldStubDocument(fields) } });
+    app.exercises = [{ name: 'Press banca', day: 'Push', sets: 3, repMin: 8, repMax: 12, unit: 'reps', bodyweight: false }];
+    app.selectedDay = 'Push';
+
+    addExerciseToToday();
+
+    const added = app.exercises.find(e => e.name === 'Remo en polea baja');
+    assert.ok(added, 'el ejercicio nuevo debería estar en app.exercises');
+    assert.equal(added.day, 'Push');
+    assert.equal(added.sets, 4);
+    assert.equal(added.repMin, 10);
+    assert.equal(added.repMax, 15);
+    assert.equal(app.exercises.length, 2, 'no debería tocar el ejercicio existente');
+});
+
+test('saveExerciseEdits reemplaza el ejercicio de la rutina (ej. lo cambiaron por un tirón)', () => {
+    const fields = {
+        'exercise-editor-name-0': 'Remo en polea baja',
+        'exercise-editor-sets-0': '4',
+        'exercise-editor-repmin-0': '10',
+        'exercise-editor-repmax-0': '15',
+        'exercise-editor-bw-0': false,
+        'exercise-editor-time-0': false
+    };
+    const { app, saveExerciseEdits } = loadApp({ sandbox: { document: makeFieldStubDocument(fields) } });
+    const original = { name: 'Press militar', day: 'Push', sets: 3, repMin: 8, repMax: 12, unit: 'reps', bodyweight: false };
+    app.exercises = [original];
+    app._trackExercises = [original];
+    app.trackSetsCount = { 'Press militar': 3 };
+
+    saveExerciseEdits(0);
+
+    assert.equal(app.exercises.length, 1);
+    assert.equal(app.exercises[0].name, 'Remo en polea baja');
+    assert.equal(app.exercises[0].sets, 4);
+    assert.equal(app.exercises[0].repMin, 10);
+    assert.equal(app.trackSetsCount['Remo en polea baja'], 4, 'el contador de series debería migrar al nombre nuevo');
+    assert.equal('Press militar' in app.trackSetsCount, false, 'no debería quedar basura con el nombre viejo');
+});
+
+test('removeExerciseFromRoutine saca el ejercicio de app.exercises tras confirmar', () => {
+    const { app, removeExerciseFromRoutine } = loadApp({ sandbox: { confirm: () => true } });
+    const ex = { name: 'Press banca', day: 'Push', sets: 3, repMin: 8, repMax: 12, unit: 'reps', bodyweight: false };
+    app.exercises = [ex];
+    app._trackExercises = [ex];
+    app.trackSetsCount = { 'Press banca': 3 };
+
+    removeExerciseFromRoutine(0);
+
+    assert.equal(app.exercises.length, 0);
+    assert.equal('Press banca' in app.trackSetsCount, false);
+});
+
+test('removeExerciseFromRoutine no hace nada si el usuario cancela la confirmación', () => {
+    const { app, removeExerciseFromRoutine } = loadApp({ sandbox: { confirm: () => false } });
+    const ex = { name: 'Press banca', day: 'Push', sets: 3, repMin: 8, repMax: 12, unit: 'reps', bodyweight: false };
+    app.exercises = [ex];
+    app._trackExercises = [ex];
+
+    removeExerciseFromRoutine(0);
+
+    assert.equal(app.exercises.length, 1);
+});
