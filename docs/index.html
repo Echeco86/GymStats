@@ -195,6 +195,46 @@
             margin-top: 2px;
         }
 
+        .edit-exercise-btn {
+            flex-shrink: 0;
+            width: auto;
+            padding: 6px 10px;
+            font-size: 12px;
+            background: var(--surface-alt);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-strong);
+        }
+
+        .exercise-editor {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px dashed var(--border-strong);
+        }
+
+        .exercise-editor-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .add-exercise-card {
+            border: 2px dashed var(--border-strong);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 12px;
+            background: transparent;
+        }
+
+        .add-exercise-toggle {
+            width: 100%;
+            background: none;
+            border: none;
+            color: var(--accent);
+            font-weight: 500;
+            font-size: 13px;
+            padding: 4px;
+        }
+
         .weight-input-group {
             display: flex;
             gap: 8px;
@@ -2311,6 +2351,39 @@
                                 <div class="exercise-name">${escapeHtml(ex.name)}${badge}${bwBadge}</div>
                                 <div class="exercise-meta">${status} · objetivo ${range.repMin}-${range.repMax} ${unitLabel} · ${range.sets} series</div>
                             </div>
+                            <button type="button" class="edit-exercise-btn" onclick="toggleExerciseEditor(${exIdx})">✏️ Editar</button>
+                        </div>
+                        <div class="exercise-editor" id="exercise-editor-${exIdx}" style="display: none;">
+                            <div class="edit-field">
+                                <label class="edit-label">Nombre del ejercicio</label>
+                                <input type="text" class="edit-input" id="exercise-editor-name-${exIdx}" value="${escapeHtml(ex.name)}">
+                            </div>
+                            <div class="edit-field" style="display: flex; gap: 8px;">
+                                <div style="flex: 1;">
+                                    <label class="edit-label">Series</label>
+                                    <input type="number" min="1" max="10" class="edit-input" id="exercise-editor-sets-${exIdx}" value="${ex.sets || range.sets}">
+                                </div>
+                                <div style="flex: 1;">
+                                    <label class="edit-label">Reps min</label>
+                                    <input type="number" min="1" max="600" class="edit-input" id="exercise-editor-repmin-${exIdx}" value="${ex.repMin || range.repMin}">
+                                </div>
+                                <div style="flex: 1;">
+                                    <label class="edit-label">Reps max</label>
+                                    <input type="number" min="1" max="600" class="edit-input" id="exercise-editor-repmax-${exIdx}" value="${ex.repMax || range.repMax}">
+                                </div>
+                            </div>
+                            <div class="edit-field" style="display: flex; gap: 16px; align-items: center;">
+                                <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
+                                    <input type="checkbox" id="exercise-editor-bw-${exIdx}" ${ex.bodyweight ? 'checked' : ''}> Peso corporal
+                                </label>
+                                <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
+                                    <input type="checkbox" id="exercise-editor-time-${exIdx}" ${ex.unit === 'seg' ? 'checked' : ''}> Se mide en segundos
+                                </label>
+                            </div>
+                            <div class="exercise-editor-actions">
+                                <button type="button" class="secondary" style="color: var(--danger-text);" onclick="removeExerciseFromRoutine(${exIdx})">Quitar de la rutina</button>
+                                <button type="button" onclick="saveExerciseEdits(${exIdx})">Guardar cambios</button>
+                            </div>
                         </div>
                         <div class="suggestion-hint">${target.message}</div>
                         ${stagnant ? '<div class="stagnation-hint">⚠️ Sin progreso en 3 sesiones. Considera cambiar el estímulo.</div>' : ''}
@@ -2365,6 +2438,44 @@
                 html += `</div>`;
                 exIdx++;
             }
+
+            const addExerciseOpen = !!this._addExerciseFormOpen;
+            html += `
+                <div class="add-exercise-card">
+                    <button type="button" class="add-exercise-toggle" onclick="toggleAddExerciseForm()">
+                        ${addExerciseOpen ? '− Cancelar' : `+ Agregar ejercicio${this.selectedDay ? ' a ' + escapeHtml(this.selectedDay) : ''}`}
+                    </button>
+                    <div id="addExerciseForm" style="display: ${addExerciseOpen ? 'block' : 'none'}; margin-top: 10px;">
+                        <div class="edit-field">
+                            <label class="edit-label">Nombre del ejercicio</label>
+                            <input type="text" class="edit-input" id="newExerciseName" placeholder="Ej: Remo en polea baja">
+                        </div>
+                        <div class="edit-field" style="display: flex; gap: 8px;">
+                            <div style="flex: 1;">
+                                <label class="edit-label">Series</label>
+                                <input type="number" min="1" max="10" class="edit-input" id="newExerciseSets" value="3">
+                            </div>
+                            <div style="flex: 1;">
+                                <label class="edit-label">Reps min</label>
+                                <input type="number" min="1" max="600" class="edit-input" id="newExerciseRepMin" value="8">
+                            </div>
+                            <div style="flex: 1;">
+                                <label class="edit-label">Reps max</label>
+                                <input type="number" min="1" max="600" class="edit-input" id="newExerciseRepMax" value="12">
+                            </div>
+                        </div>
+                        <div class="edit-field" style="display: flex; gap: 16px; align-items: center;">
+                            <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
+                                <input type="checkbox" id="newExerciseBodyweight"> Peso corporal
+                            </label>
+                            <label style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
+                                <input type="checkbox" id="newExerciseTimeBased"> Se mide en segundos
+                            </label>
+                        </div>
+                        <button type="button" onclick="addExerciseToToday()">Agregar</button>
+                    </div>
+                </div>
+            `;
 
             html += `
                 <div class="form-group" style="margin-top: 8px;">
@@ -2445,6 +2556,109 @@
                 if (!app._openSetOverrides) app._openSetOverrides = {};
                 app._openSetOverrides[ex.name] = willOpen;
             }
+        };
+
+        window.toggleExerciseEditor = function(exIdx) {
+            const panel = document.getElementById(`exercise-editor-${exIdx}`);
+            if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        };
+
+        window.saveExerciseEdits = function(exIdx) {
+            const ex = app._trackExercises && app._trackExercises[exIdx];
+            if (!ex) return;
+            const globalIdx = app.exercises.indexOf(ex);
+            if (globalIdx === -1) return;
+
+            const newName = (document.getElementById(`exercise-editor-name-${exIdx}`).value || '').trim();
+            if (!newName) {
+                app.showAlert('El ejercicio necesita un nombre', 'error');
+                return;
+            }
+
+            const setsVal = document.getElementById(`exercise-editor-sets-${exIdx}`).value;
+            const repMinVal = document.getElementById(`exercise-editor-repmin-${exIdx}`).value;
+            const repMaxVal = document.getElementById(`exercise-editor-repmax-${exIdx}`).value;
+            const bodyweight = document.getElementById(`exercise-editor-bw-${exIdx}`).checked;
+            const timeBased = document.getElementById(`exercise-editor-time-${exIdx}`).checked;
+
+            let repMin = Math.max(1, parseInt(repMinVal, 10) || ex.repMin || 8);
+            let repMax = Math.max(1, parseInt(repMaxVal, 10) || ex.repMax || 12);
+            if (repMin > repMax) { const t = repMin; repMin = repMax; repMax = t; }
+            const sets = Math.max(1, parseInt(setsVal, 10) || ex.sets || 3);
+
+            const oldName = ex.name;
+            app.exercises[globalIdx] = {
+                ...ex,
+                name: newName,
+                sets,
+                repMin,
+                repMax,
+                bodyweight,
+                unit: timeBased ? 'seg' : 'reps'
+            };
+
+            if (app.trackSetsCount) {
+                if (oldName !== newName && oldName in app.trackSetsCount) delete app.trackSetsCount[oldName];
+                app.trackSetsCount[newName] = sets;
+            }
+            if (app._openSetOverrides && oldName !== newName && oldName in app._openSetOverrides) {
+                app._openSetOverrides[newName] = app._openSetOverrides[oldName];
+                delete app._openSetOverrides[oldName];
+            }
+
+            app.saveToStorage();
+            app.showAlert('✓ Ejercicio actualizado', 'success');
+            app.refreshTrack();
+        };
+
+        window.removeExerciseFromRoutine = function(exIdx) {
+            const ex = app._trackExercises && app._trackExercises[exIdx];
+            if (!ex) return;
+            if (!confirm(`¿Quitar "${ex.name}" de la rutina? Esto no borra el historial ya registrado, pero ya no vas a poder cargar series nuevas para este ejercicio salvo que lo agregues de nuevo.`)) return;
+
+            const globalIdx = app.exercises.indexOf(ex);
+            if (globalIdx === -1) return;
+            app.exercises.splice(globalIdx, 1);
+            if (app.trackSetsCount) delete app.trackSetsCount[ex.name];
+            if (app._openSetOverrides) delete app._openSetOverrides[ex.name];
+
+            app.saveToStorage();
+            app.showAlert('Ejercicio quitado de la rutina', 'success');
+            app.refreshTrack();
+        };
+
+        window.toggleAddExerciseForm = function() {
+            const snapshot = snapshotFormValues();
+            app._addExerciseFormOpen = !app._addExerciseFormOpen;
+            app.refreshTrack();
+            restoreFormValues(snapshot);
+        };
+
+        window.addExerciseToToday = function() {
+            const name = (document.getElementById('newExerciseName').value || '').trim();
+            if (!name) {
+                app.showAlert('Ingresá un nombre para el ejercicio', 'error');
+                return;
+            }
+
+            const setsVal = document.getElementById('newExerciseSets').value;
+            const repMinVal = document.getElementById('newExerciseRepMin').value;
+            const repMaxVal = document.getElementById('newExerciseRepMax').value;
+            const bodyweight = document.getElementById('newExerciseBodyweight').checked;
+            const timeBased = document.getElementById('newExerciseTimeBased').checked;
+
+            let repMin = Math.max(1, parseInt(repMinVal, 10) || 8);
+            let repMax = Math.max(1, parseInt(repMaxVal, 10) || 12);
+            if (repMin > repMax) { const t = repMin; repMin = repMax; repMax = t; }
+            const sets = Math.max(1, parseInt(setsVal, 10) || 3);
+            const day = app.selectedDay || 'General';
+
+            app.exercises.push({ name, day, sets, repMin, repMax, unit: timeBased ? 'seg' : 'reps', bodyweight });
+
+            app._addExerciseFormOpen = false;
+            app.saveToStorage();
+            app.showAlert(`✓ "${name}" agregado a ${day}`, 'success');
+            app.refreshTrack();
         };
 
         window.setupSetPropagation = function() {
