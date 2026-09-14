@@ -342,7 +342,7 @@
             transition: transform 0.2s;
         }
 
-        .exercise-card.is-expanded .exercise-chevron {
+        .is-expanded .exercise-chevron {
             transform: rotate(180deg);
             background: var(--accent-soft);
             color: var(--accent);
@@ -459,15 +459,42 @@
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-md);
-            padding: 13px 14px;
+            padding: 0;
             margin-bottom: 10px;
             box-shadow: var(--shadow-card);
+            overflow: hidden;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            padding: 13px 14px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .history-header:active {
+            background: var(--surface-alt);
         }
 
         .history-date {
-            color: var(--accent);
-            font-weight: 500;
-            font-size: 13px;
+            color: var(--text);
+            font-weight: 600;
+            font-size: 13.5px;
+        }
+
+        .history-summary {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 3px;
+        }
+
+        .history-body {
+            padding: 0 14px 14px;
+            border-top: 1px solid var(--border);
+            padding-top: 10px;
         }
 
         .history-detail {
@@ -724,6 +751,47 @@
             margin-top: 0;
         }
 
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text);
+            margin: 24px 0 10px;
+        }
+
+        .section-header:first-child {
+            margin-top: 0;
+        }
+
+        .section-subtext {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: -6px;
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+
+        .recommendation-item {
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            border-left: 3px solid transparent;
+        }
+
+        .recommendation-item-title {
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 4px;
+        }
+
+        .recommendation-item-text {
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
         .edit-card-header {
             display: flex;
             justify-content: space-between;
@@ -742,6 +810,37 @@
             font-size: 11px;
             color: #ff6b6b;
             border-color: var(--danger-border);
+        }
+
+        .session-date-bar {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 10px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            box-shadow: var(--shadow-card);
+        }
+
+        .session-date-field .form-label {
+            margin-bottom: 4px;
+        }
+
+        .session-date-bar input[type="date"] {
+            font-weight: 600;
+        }
+
+        .session-date-day {
+            flex-shrink: 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent);
+            background: var(--accent-soft);
+            padding: 6px 10px;
+            border-radius: 999px;
         }
 
         .day-select {
@@ -1609,14 +1708,19 @@
                 return 10;
             },
 
-            addSesión(records, notes = '', cardio = null, durationMin = null) {
+            addSesión(records, notes = '', cardio = null, durationMin = null, dateStr = null) {
                 const now = new Date();
                 const today = now.toISOString().split('T')[0];
+                // Fecha atrasada: no sabemos la hora real, así que cae al
+                // mediodía de esa fecha con hora_estimada=true (mismo criterio
+                // que usan las migraciones para sesiones sin hora_inicio real).
+                const isBackdated = !!dateStr && dateStr !== today;
+                const date = dateStr || today;
                 const totalSets = Object.values(records).reduce((sum, sets) => sum + (Array.isArray(sets) ? sets.length : 0), 0);
                 const sesion = {
-                    date: today,
-                    hora_inicio: now.toISOString(),
-                    hora_estimada: false,
+                    date: date,
+                    hora_inicio: isBackdated ? date + 'T12:00:00.000Z' : now.toISOString(),
+                    hora_estimada: isBackdated,
                     day: this.selectedDay,
                     records: records,
                     notes: notes,
@@ -1626,7 +1730,12 @@
                 };
                 this.history.push(sesion);
                 this.saveToStorage();
-                this.showAlert('✓ Sesión finalizada. Podés elegir otro día para la próxima', 'success');
+                this.showAlert(
+                    isBackdated
+                        ? `✓ Sesión del ${new Date(date + 'T12:00:00').toLocaleDateString('es-AR')} guardada`
+                        : '✓ Sesión finalizada. Podés elegir otro día para la próxima',
+                    'success'
+                );
                 stopRestTimer();
                 this.refreshTrack();
                 this.checkBackupReminder();
@@ -2265,7 +2374,7 @@
             const container = document.getElementById('analysisList');
             
             if (!this.history.length) {
-                container.innerHTML = '<div class="no-data-message">Registra algunas sesiones para ver el análisis</div>';
+                container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div>Registrá algunas sesiones para ver el análisis.</div>';
                 return;
             }
 
@@ -2279,11 +2388,12 @@
                 return;
             }
 
-            html += '<div class="alert" style="margin-top: 20px;">Análisis de ratios de fuerza basado en tus últimos registros</div>';
+            html += '<div class="section-header">⚖️ Ratios de fuerza</div>';
+            html += '<div class="section-subtext">Basado en tus últimos registros de sentadilla, banca y remo.</div>';
 
             for (const [key, data] of Object.entries(analysis.exercises)) {
                 const fill = Math.min((data.percentage / 100) * 100, 150);
-                const statusClass = data.status === 'good' ? 'status-good' : 
+                const statusClass = data.status === 'good' ? 'status-good' :
                                    data.status === 'strong' ? 'status-warning' : 'status-danger';
 
                 html += `
@@ -2306,25 +2416,20 @@
             }
 
             if (analysis.recommendations.length) {
-                html += '<div style="margin-top: 20px;"><div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">Recomendaciones:</div>';
+                html += '<div class="section-header">💡 Recomendaciones</div>';
 
                 for (const rec of analysis.recommendations) {
-                    const bgColor = rec.severity === 'high' ? 'var(--danger-bg)' :
-                                   rec.severity === 'warning' ? 'var(--warning-bg)' :
-                                   rec.severity === 'good' ? 'var(--success-bg)' : 'var(--info-bg)';
-                    const borderColor = rec.severity === 'high' ? 'var(--danger-border)' :
-                                       rec.severity === 'warning' ? 'var(--warning-border)' :
-                                       rec.severity === 'good' ? 'var(--success-border)' : 'var(--info-border)';
+                    const severityClass = rec.severity === 'high' ? 'danger' :
+                                   rec.severity === 'warning' ? 'warning' :
+                                   rec.severity === 'good' ? 'success' : 'info';
 
                     html += `
-                        <div style="background: ${bgColor}; border-left: 2px solid ${borderColor}; border-radius: 8px; padding: 12px; margin-bottom: 8px; font-size: 12px;">
-                            <div style="font-weight: 500; color: var(--text); margin-bottom: 4px;">${rec.title}</div>
-                            <div style="color: var(--text-secondary); line-height: 1.5;">${rec.text}</div>
+                        <div class="recommendation-item" style="background: var(--${severityClass}-bg); border-left-color: var(--${severityClass}-border);">
+                            <div class="recommendation-item-title">${rec.title}</div>
+                            <div class="recommendation-item-text">${rec.text}</div>
                         </div>
                     `;
                 }
-
-                html += '</div>';
             }
 
             container.innerHTML = html;
@@ -2398,7 +2503,8 @@
             const groupsWithData = MUSCLE_GROUP_ORDER.filter(g => g !== 'otro' || counts[g]);
             if (!groupsWithData.length) return '';
 
-            let html = '<div class="alert">Series efectivas por grupo muscular en los últimos 7 días. Objetivo: 12-18 semanales.</div>';
+            let html = '<div class="section-header">📊 Volumen semanal por grupo muscular</div>';
+            html += '<div class="section-subtext">Series efectivas en los últimos 7 días. Objetivo: 12-18 semanales.</div>';
             for (const group of groupsWithData) {
                 const count = counts[group] || 0;
                 const info = classifyVolumeStatus(count);
@@ -2472,7 +2578,8 @@
                 : `⚠️ Van ${weeksSinceDeload} semanas de acumulación. Estás en la ventana recomendada (6-8 semanas) para programar una descarga pronto.`;
 
             return `
-                <div class="ratio-card" style="margin-top: 12px;">
+                <div class="section-header">🔄 Descarga</div>
+                <div class="ratio-card">
                     <div class="ratio-exercise">Semana de descarga</div>
                     <div class="ratio-status" style="color: ${color}; margin-top: 6px;">${label}</div>
                 </div>
@@ -2652,8 +2759,16 @@
                 this._expandedDayKey = this.selectedDay;
             }
 
+            const todayIso = new Date().toISOString().split('T')[0];
             let html = `
-                <div class="alert">Sesión de ${new Date().toLocaleDateString('es-AR')}${this.selectedDay ? ' · ' + escapeHtml(this.selectedDay) : ''}</div>
+                <div class="session-date-bar">
+                    <div class="session-date-field">
+                        <label class="form-label">Fecha de la sesión</label>
+                        <input type="date" id="sessionDate" value="${todayIso}" max="${todayIso}" onchange="onSessionDateChange(this.value)">
+                    </div>
+                    ${this.selectedDay ? `<div class="session-date-day">${escapeHtml(this.selectedDay)}</div>` : ''}
+                </div>
+                <div class="stagnation-hint" id="backdateHint" style="display: none; margin-bottom: 14px;">📅 Estás cargando una sesión de otra fecha. Las sugerencias de peso siguen mostrando tu progreso más reciente, no el de ese día.</div>
                 ${daySelectorHtml}
                 ${buildRestTimerHtml()}
                 <form onsubmit="handleSubmitSesión(event)">
@@ -2911,6 +3026,12 @@
             document.querySelectorAll('#currentRoutine .exercise-card').forEach(updateCardProgress);
         };
 
+        window.onSessionDateChange = function(value) {
+            const todayIso = new Date().toISOString().split('T')[0];
+            const hint = document.getElementById('backdateHint');
+            if (hint) hint.style.display = (value && value !== todayIso) ? 'block' : 'none';
+        };
+
         window.selectDay = function(day) {
             app.selectedDay = day;
             app.saveToStorage();
@@ -3110,7 +3231,7 @@
                 const key = `${input.dataset.exercise}::${input.dataset.set}::${input.dataset.field}`;
                 if (input.value) snapshot.sets[key] = input.value;
             });
-            ['sessionDuration', 'cardioDuration', 'cardioCalories', 'cardioAvgHr', 'cardioLoad', 'cardioActiveMin', 'cardioDistance'].forEach(id => {
+            ['sessionDate', 'sessionDuration', 'cardioDuration', 'cardioCalories', 'cardioAvgHr', 'cardioLoad', 'cardioActiveMin', 'cardioDistance'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el && el.value) snapshot.cardio[id] = el.value;
             });
@@ -3131,6 +3252,7 @@
             });
             const notesEl = document.getElementById('sesionNotes');
             if (notesEl && snapshot.notes) notesEl.value = snapshot.notes;
+            if (snapshot.cardio.sessionDate) onSessionDateChange(snapshot.cardio.sessionDate);
             refreshExerciseProgressChips();
         };
 
@@ -3232,8 +3354,13 @@
                 return;
             }
 
+            const todayIso = new Date().toISOString().split('T')[0];
+            const dateInput = document.getElementById('sessionDate');
+            let dateStr = dateInput && dateInput.value ? dateInput.value : todayIso;
+            if (dateStr > todayIso) dateStr = todayIso;
+
             const notes = document.getElementById('sesionNotes').value;
-            app.addSesión(records, notes, cardio, sessionDuration);
+            app.addSesión(records, notes, cardio, sessionDuration, dateStr);
             app.trackSetsCount = {};
         };
 
@@ -3249,13 +3376,14 @@
                 const sesion = this.history[i];
                 const date = new Date(sesion.date).toLocaleDateString('es-AR');
                 const records = sesion.records || {};
-                const rows = Object.entries(records)
-                    .filter(([, sets]) => Array.isArray(sets) && sets.length)
+                const entries = Object.entries(records).filter(([, sets]) => Array.isArray(sets) && sets.length);
+                const rows = entries
                     .map(([name, sets]) => {
                         const setsText = sets.map(s => `${s.weight}×${s.reps}`).join(', ');
                         return `${escapeHtml(name)}: ${setsText}`;
                     })
                     .join(' · ');
+                const totalSets = entries.reduce((sum, [, sets]) => sum + sets.length, 0);
 
                 let cardioText = '';
                 if (sesion.cardio) {
@@ -3269,16 +3397,41 @@
                     if (parts.length) cardioText = `<div class="history-detail" style="margin-top: 4px; color: var(--cyan-text);">🏃 ${parts.join(' · ')}</div>`;
                 }
 
+                const summaryParts = [];
+                if (entries.length) summaryParts.push(`${entries.length} ejercicio${entries.length === 1 ? '' : 's'} · ${totalSets} serie${totalSets === 1 ? '' : 's'}`);
+                if (sesion.cardio) summaryParts.push('🏃 cardio');
+                if (sesion.notes) summaryParts.push('📝 notas');
+                if (sesion.hora_estimada) summaryParts.push('hora estimada');
+                const summaryText = summaryParts.length ? summaryParts.join(' · ') : 'Sin ejercicios registrados';
+
+                const isFirst = i === this.history.length - 1;
                 html += `
-                    <div class="history-item">
-                        <div class="history-date">${date}${sesion.day ? ' · ' + escapeHtml(sesion.day) : ''}</div>
-                        <div class="history-detail">${rows || 'Sin ejercicios registrados'}</div>
-                        ${cardioText}
-                        ${sesion.notes ? `<div class="history-detail" style="margin-top: 4px; color: var(--text-secondary);">📝 ${escapeHtml(sesion.notes)}</div>` : ''}
+                    <div class="history-item${isFirst ? ' is-expanded' : ''}" id="history-item-${i}">
+                        <div class="history-header" onclick="toggleHistoryItem(${i})">
+                            <div>
+                                <div class="history-date">${date}${sesion.day ? ' · ' + escapeHtml(sesion.day) : ''}</div>
+                                <div class="history-summary">${summaryText}</div>
+                            </div>
+                            <span class="exercise-chevron">▾</span>
+                        </div>
+                        <div class="history-body" id="history-body-${i}" style="display: ${isFirst ? 'block' : 'none'};">
+                            <div class="history-detail">${rows || 'Sin ejercicios registrados'}</div>
+                            ${cardioText}
+                            ${sesion.notes ? `<div class="history-detail" style="margin-top: 4px; color: var(--text-secondary);">📝 ${escapeHtml(sesion.notes)}</div>` : ''}
+                        </div>
                     </div>
                 `;
             }
             container.innerHTML = html;
+        };
+
+        window.toggleHistoryItem = function(i) {
+            const item = document.getElementById(`history-item-${i}`);
+            const body = document.getElementById(`history-body-${i}`);
+            if (!item || !body) return;
+            const willExpand = body.style.display === 'none';
+            body.style.display = willExpand ? 'block' : 'none';
+            item.classList.toggle('is-expanded', willExpand);
         };
 
         app.refreshStats = function() {
