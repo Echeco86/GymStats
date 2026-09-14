@@ -1170,13 +1170,30 @@
             margin-top: 8px;
         }
 
+        .bw-history-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 4px 14px;
+            box-shadow: var(--shadow-card);
+        }
+
         .bw-history-row {
             display: flex;
             justify-content: space-between;
-            font-size: 12px;
+            font-size: 12.5px;
             color: var(--text-secondary);
-            padding: 6px 0;
+            padding: 9px 0;
             border-bottom: 1px solid var(--border);
+        }
+
+        .bw-history-row span:last-child {
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        .bw-history-row:last-child {
+            border-bottom: none;
         }
 
         .no-data-message {
@@ -3441,7 +3458,8 @@
                 return;
             }
 
-            let html = '<div class="stats-grid">';
+            let html = '<div class="section-header">📈 Última marca por ejercicio</div>';
+            html += '<div class="stats-grid">';
             for (const ex of this.exercises) {
                 const records = this.getLastNRecords(ex.name, 2);
                 const last = records[records.length - 1];
@@ -3473,7 +3491,7 @@
             }
             html += '</div>';
 
-            html += '<div style="font-size: 12px; color: var(--text-secondary); margin: 20px 0 12px; font-weight: 500;">Progresión de 1RM estimado</div>';
+            html += '<div class="section-header">📉 Progresión de 1RM estimado</div>';
             let anyChart = false;
             for (const ex of this.exercises) {
                 const series = this.getExerciseE1RMSeries(ex.name, 20);
@@ -3514,7 +3532,7 @@
 
         function buildSparklineSvg(values, opts = {}) {
             const height = opts.height || 36;
-            const color = opts.color || '#007AFF';
+            const color = opts.color || 'var(--accent)';
             if (values.length < 2) return '';
             const width = 100;
             const pad = 2;
@@ -3525,7 +3543,7 @@
             const scaleY = (v) => height - pad - ((v - min) / range) * (height - pad * 2);
             const points = values.map((v, i) => `${(pad + i * xStep).toFixed(1)},${scaleY(v).toFixed(1)}`).join(' ');
             return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%; height:${height}px; display:block; margin-top:8px;">
-                <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" />
+                <polyline points="${points}" fill="none" style="stroke: ${color};" stroke-width="2" />
             </svg>`;
         }
 
@@ -3597,6 +3615,7 @@
             const weeklyChangePct = prevAvgEntry ? ((latestAvg.avg - prevAvgEntry.avg) / prevAvgEntry.avg) * 100 : null;
             const trend = classifyWeightTrend(weeklyChangePct);
 
+            html += '<div class="section-header">📉 Tendencia</div>';
             html += `
                 <div class="bw-chart-card">
                     ${buildBodyweightChartSvg(sorted.slice(-60), movingAvg.slice(-60))}
@@ -3614,7 +3633,8 @@
                 </div>
             `;
 
-            html += '<div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; font-weight: 500;">Últimos registros</div>';
+            html += '<div class="section-header">📋 Últimos registros</div>';
+            html += '<div class="bw-history-card">';
             for (let i = sorted.length - 1; i >= Math.max(0, sorted.length - 14); i--) {
                 const e = sorted[i];
                 const dateLabel = new Date(e.date).toLocaleDateString('es-AR');
@@ -3625,6 +3645,7 @@
                     </div>
                 `;
             }
+            html += '</div>';
 
             container.innerHTML = html;
         };
@@ -3670,10 +3691,10 @@
 
             return `
                 <svg viewBox="0 0 ${width} ${height}" style="width:100%; height:90px; display:block;" preserveAspectRatio="none">
-                    <polyline points="${rawPoints}" fill="none" stroke="#6b6b72" stroke-width="1.5" />
-                    ${avgPoints ? `<polyline points="${avgPoints}" fill="none" stroke="#007AFF" stroke-width="2" />` : ''}
+                    <polyline points="${rawPoints}" fill="none" style="stroke: var(--text-tertiary);" stroke-width="1.5" />
+                    ${avgPoints ? `<polyline points="${avgPoints}" fill="none" style="stroke: var(--accent);" stroke-width="2" />` : ''}
                 </svg>
-                <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px;">Gris: peso diario · Azul: media móvil 7 días</div>
+                <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px;">Gris: peso diario · Color: media móvil 7 días</div>
             `;
         }
 
